@@ -17,13 +17,30 @@
     text-align:center; cursor:pointer;
   }
   #drop.hidden { display:none; }
+  #toast {
+    position:fixed; left:50%; bottom:36px; transform:translateX(-50%);
+    padding:8px 18px; border-radius:20px; background:rgba(12,16,22,.82);
+    color:#dfe6f0; font:13px "Microsoft YaHei",sans-serif; pointer-events:none;
+    opacity:0; transition:opacity .25s; border:1px solid rgba(120,150,190,.25);
+  }
+  #bar { width:260px; height:4px; margin:14px auto 0; border-radius:2px; background:rgba(120,150,190,.2); overflow:hidden; }
+  #barfill { height:100%; width:0%; background:#7fb2ff; transition:width .1s; }
+  #err { color:#ff9b9b; font:12px/1.6 Consolas,monospace; margin-top:10px; max-width:520px; word-break:break-all; }
   #drop b { color:#7fb2ff; }
 </style>
 </head>
 <body>
 <canvas id="gl"></canvas>
 <div id="hud"></div>
-<div id="drop">拖入 .ply 文件，或<b>点击选择</b><br><span style="opacity:.7">（3D Gaussian Splatting 标准格式）</span></div>
+<div id="toast"></div>
+<div id="drop">
+  <div>
+    <div>拖入 .ply 文件，或<b>点击选择</b></div>
+    <div style="opacity:.7;font-size:13px">（3D Gaussian Splatting 标准格式）</div>
+    <div id="bar"><div id="barfill"></div></div>
+    <div id="err"></div>
+  </div>
+</div>
 <input id="file" type="file" accept=".ply" style="display:none">
 
 <script>
@@ -425,7 +442,8 @@ function draw() {
 
   const w = canvas.width, h = canvas.height;
   gl.viewport(0, 0, w, h);
-  gl.clearColor(0.62, 0.72, 0.85, 1.0);
+  const bgc = BACKGROUNDS[bgIndex].rgb;
+  gl.clearColor(bgc[0], bgc[1], bgc[2], 1.0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enable(gl.BLEND);
   // 千万不要用 ONE_MINUS_DST_ALPHA：本 canvas 是 alpha:false 创建的，
@@ -469,45 +487,116 @@ function draw() {
 
 // ---------------------------------------------------------------------------
 // 交互
+//   中键拖拽      = 旋转        （Blender / SolidWorks 习惯）
+//   中键 + Shift  = 平移
+//   中键 + Ctrl   = 缩放
+//   左键拖拽      = 旋转（保留，方便没有中键的设备）
+//   R = 重置视角      B = 换背景
 // ---------------------------------------------------------------------------
-let dragging = false, lastX = 0, lastY = 0;
-canvas.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-window.addEventListener('mouseup', () => dragging = false);
-window.addEventListener('mousemove', e => {
-  if (!dragging) return;
-  cam.yaw -= (e.clientX - lastX) * 0.006;
-  cam.pitch = Math.max(-1.45, Math.min(1.45, cam.pitch + (e.clientY - lastY) * 0.006));
+const BACKGROUNDS = [
+  { name: '天空蓝', rgb: [0.62, 0.72, 0.85] },
+  { name: '深海灰', rgb: [0.11, 0.12, 0.15] },
+  { name: '中性灰', rgb: [0.50, 0.50, 0.52] },
+  { name: '纯白',   rgb: [0.96, 0.96, 0.96] },
+  { name: '暖灰',   rgb: [0.56, 0.51, 0.45] },
+];
+let bgIndex = 0;
+let homeView = null;
+
+function clampDist(d) { return Math.max(0.05, Math.min(500, d)); }
+
+function resetView() {
+  if (!homeView) return;
+  cam.yaw = homeView.yaw;
+  cam.pitch = homeView.pitch;
+  cam.dist = homeView.dist;
+  cam.target = homeView.target.slice();
+  flash('视角已重置');
+}
+
+let flashTimer = null;
+function flash(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => el.style.opacity = '0', 1200);
+}
+
+let dragMode = null, lastX = 0, lastY = 0;
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 1) {
+    dragMode = e.shiftKey ? 'pan' : (e.ctrlKey ? 'zoom' : 'rotate');
+    e.preventDefault();                 // 中键默认会触发浏览器自动滚动，必须拦掉
+  } else if (e.button === 0) {
+    dragMode = e.shiftKey ? 'pan' : 'rotate';
+  } else {
+    return;
+  }
   lastX = e.clientX; lastY = e.clientY;
 });
+window.addEventListener('mouseup', () => dragMode = null);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function cameraBasis() {
+  const eye = cameraPosition();
+  const f = [cam.target[0]-eye[0], cam.target[1]-eye[1], cam.target[2]-eye[2]];
+  const fn = Math.hypot(...f) || 1; f[0]/=fn; f[1]/=fn; f[2]/=fn;
+  const r = [-f[1], f[0], 0];
+  const rn = Math.hypot(...r) || 1; r[0]/=rn; r[1]/=rn;
+  const d = [f[1]*r[2]-f[2]*r[1], f[2]*r[0]-f[0]*r[2], f[0]*r[1]-f[1]*r[0]];
+  return { f, r, d };
+}
+
+window.addEventListener('mousemove', e => {
+  if (!dragMode || !gpu) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  if (dragMode === 'rotate') {
+    cam.yaw -= dx * 0.006;
+    cam.pitch = Math.max(-1.45, Math.min(1.45, cam.pitch + dy * 0.006));
+  } else if (dragMode === 'pan') {
+    const { r, d } = cameraBasis();
+    // 平移量随距离缩放，远近场景手感一致；方向按「抓住画面拖动」的直觉
+    const k = cam.dist * 0.0018;
+    for (let i = 0; i < 3; i++) cam.target[i] += (-r[i] * dx - d[i] * dy) * k;
+  } else if (dragMode === 'zoom') {
+    cam.dist = clampDist(cam.dist * Math.exp(dy * 0.005));
+  }
+  lastX = e.clientX; lastY = e.clientY;
+});
+
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  cam.dist = Math.max(0.3, Math.min(60, cam.dist * Math.exp(e.deltaY * 0.0012)));
+  cam.dist = clampDist(cam.dist * Math.exp(e.deltaY * 0.0012));
 }, { passive: false });
 
 const keys = {};
-window.addEventListener('keydown', e => keys[e.code] = true);
-window.addEventListener('keyup', e => keys[e.code] = false);
 let shift = false;
-window.addEventListener('keydown', e => shift = e.shiftKey);
-window.addEventListener('keyup', e => shift = e.shiftKey);
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  shift = e.shiftKey;
+  if (e.code === 'KeyR') resetView();
+  if (e.code === 'KeyB') {
+    bgIndex = (bgIndex + 1) % BACKGROUNDS.length;
+    flash('背景：' + BACKGROUNDS[bgIndex].name);
+  }
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; shift = e.shiftKey; });
 
 function moveCamera(dt) {
   const speed = (shift ? 3.0 : 1.0) * cam.dist * dt;
-  const eye = cameraPosition();
-  const f = [cam.target[0]-eye[0], cam.target[1]-eye[1], cam.target[2]-eye[2]];
-  const fn = Math.hypot(...f); f[0]/=fn; f[1]/=fn; f[2]/=fn;
-  const r = [-f[1], f[0], 0];
-  const rn = Math.hypot(...r) || 1; r[0]/=rn; r[1]/=rn;
+  const { f, r } = cameraBasis();
   let moved = false;
-  if (keys['KeyW']) { cam.target[0]+=f[0]*speed; cam.target[1]+=f[1]*speed; cam.target[2]+=f[2]*speed; moved=true; }
-  if (keys['KeyS']) { cam.target[0]-=f[0]*speed; cam.target[1]-=f[1]*speed; cam.target[2]-=f[2]*speed; moved=true; }
-  if (keys['KeyA']) { cam.target[0]-=r[0]*speed; cam.target[1]-=r[1]*speed; moved=true; }
-  if (keys['KeyD']) { cam.target[0]+=r[0]*speed; cam.target[1]+=r[1]*speed; moved=true; }
-  if (keys['KeyQ']) { cam.target[2]-=speed; moved=true; }
-  if (keys['KeyE']) { cam.target[2]+=speed; moved=true; }
+  if (keys['KeyW']) { for (let i = 0; i < 3; i++) cam.target[i] += f[i]*speed; moved = true; }
+  if (keys['KeyS']) { for (let i = 0; i < 3; i++) cam.target[i] -= f[i]*speed; moved = true; }
+  if (keys['KeyA']) { cam.target[0] -= r[0]*speed; cam.target[1] -= r[1]*speed; moved = true; }
+  if (keys['KeyD']) { cam.target[0] += r[0]*speed; cam.target[1] += r[1]*speed; moved = true; }
+  if (keys['KeyQ']) { cam.target[2] -= speed; moved = true; }
+  if (keys['KeyE']) { cam.target[2] += speed; moved = true; }
   if (moved) {
     const ne = cameraPosition();
-    cam.dist = Math.hypot(cam.target[0]-ne[0], cam.target[1]-ne[1], cam.target[2]-ne[2]);
+    cam.dist = clampDist(Math.hypot(cam.target[0]-ne[0], cam.target[1]-ne[1], cam.target[2]-ne[2]));
   }
 }
 
@@ -526,7 +615,7 @@ function loop(t) {
   frames++;
   if (t - fpsT > 500) { fps = frames * 1000 / (t - fpsT); frames = 0; fpsT = t; }
   hud.textContent = gpu
-    ? `高斯数   ${gpu.model.count.toLocaleString()}\n帧率     ${fps.toFixed(1)} fps（绘制 ${drawMs.toFixed(1)} ms）\n距离     ${cam.dist.toFixed(2)}\n\n左键拖拽旋转 · 滚轮缩放 · WASD 平移 · Q/E 升降 · Shift 加速`
+    ? `高斯数   ${gpu.model.count.toLocaleString()}\n帧率     ${fps.toFixed(1)} fps（绘制 ${drawMs.toFixed(1)} ms）\n距离     ${cam.dist.toFixed(2)}   背景 ${BACKGROUNDS[bgIndex].name}\n\n中键拖拽 旋转 · 中键+Shift 平移 · 中键+Ctrl 缩放\n左键拖拽 旋转 · 滚轮 缩放 · WASD 平移 · Q/E 升降\nR 重置视角 · B 换背景`
     : '等待载入 .ply';
   requestAnimationFrame(loop);
 }
@@ -543,9 +632,66 @@ window.addEventListener('resize', resize);
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
 
+function setProgress(frac, label) {
+  const bar = document.getElementById('barfill');
+  const err = document.getElementById('err');
+  bar.style.width = (frac === null ? 100 : Math.round(frac * 100)) + '%';
+  if (label) err.textContent = label;
+  if (frac === null) err.style.color = '#9fb4cc';
+}
+function showError(msg) {
+  const err = document.getElementById('err');
+  err.style.color = '#ff9b9b';
+  err.textContent = msg;
+  document.getElementById('barfill').style.width = '0%';
+  drop.classList.remove('hidden');
+  console.error(msg);
+}
+
+async function loadFromUrl(url, name) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+    const total = parseInt(resp.headers.get('Content-Length') || '0', 10);
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      setProgress(total ? got / total : null,
+                  `读取中 ${(got / 1e6).toFixed(1)}${total ? ' / ' + (total / 1e6).toFixed(1) : ''} MB`);
+    }
+    const buf = new Uint8Array(got);
+    let off = 0;
+    for (const c of chunks) { buf.set(c, off); off += c.length; }
+    loadBuffer(buf.buffer, name);
+  } catch (e) {
+    showError('加载失败：' + e.message);
+  }
+}
+
 function loadBuffer(buf, name) {
-  const model = parsePly(buf);
-  upload(model);
+  setProgress(null, '解析中…');
+  let model;
+  try {
+    model = parsePly(buf);
+  } catch (e) {
+    showError('PLY 解析失败：' + e.message);
+    return;
+  }
+  if (!model.count) {
+    showError('文件里没有顶点数据');
+    return;
+  }
+  try {
+    upload(model);
+  } catch (e) {
+    showError('上传到显存失败：' + e.message);
+    return;
+  }
   drop.classList.add('hidden');
   document.title = name + ' — 3DGS 查看器';
   // 自动摆位必须基于「点云包围盒」，不能假设场景在原点。
@@ -567,7 +713,11 @@ function loadBuffer(buf, name) {
   const p85 = rad[Math.floor(rad.length * 0.85)] || 1;
   sceneRadius = p85;
   cam.target = ctr;
-  cam.dist = Math.max(0.3, p85 * 2.6);
+  // 2.6 太远：真实场景的点云包含大量训练视角之外的漂浮高斯，
+  // 从包围盒外看会把它们全暴露出来，主体反而糊成一团。1.2 更贴近「站在物体前」的观感。
+  cam.dist = clampDist(p85 * 1.2);
+  // 记下初始视角，R 键用它复位
+  homeView = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, target: cam.target.slice() };
   console.log('中位中心', ctr.map(v=>v.toFixed(2)), 'p85 半径', p85.toFixed(3), '-> 距离', cam.dist.toFixed(2));
   console.log('已载入', name, model.count, '个高斯');
 }
@@ -575,7 +725,7 @@ function loadBuffer(buf, name) {
 drop.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
   const f = fileInput.files[0];
-  if (f) f.arrayBuffer().then(b => loadBuffer(b, f.name));
+  if (f) f.arrayBuffer().then(b => loadBuffer(b, f.name)).catch(e => showError('读取失败：' + e.message));
 });
 ['dragenter','dragover'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hidden'); }));
 window.addEventListener('drop', e => {
@@ -587,12 +737,13 @@ window.addEventListener('drop', e => {
 // 支持 ?model=xxx.ply 自动载入
 const params = new URLSearchParams(location.search);
 if (params.get('model')) {
-  fetch(params.get('model')).then(r => r.arrayBuffer()).then(b => loadBuffer(b, params.get('model')));
+  loadFromUrl(params.get('model'), params.get('model'));
 } else {
   // 同目录下若有 point_cloud.ply 就自动载入
   fetch('point_cloud.ply', { method: 'HEAD' }).then(r => {
-    if (r.ok) return fetch('point_cloud.ply').then(x => x.arrayBuffer()).then(b => loadBuffer(b, 'point_cloud.ply'));
-  }).catch(() => {});
+    if (r.ok) loadFromUrl('point_cloud.ply', 'point_cloud.ply');
+    else setProgress(null, '未找到 point_cloud.ply，请拖入文件');
+  }).catch(e => setProgress(null, '未找到 point_cloud.ply，请拖入文件'));
 }
 
 resize();
