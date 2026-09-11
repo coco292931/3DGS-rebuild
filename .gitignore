@@ -7,6 +7,26 @@ output/*/
 !output/deliverable/
 !output/deliverable_real/
 
+# ---- 官方 CUDA 扩展：源码与编译产物都不进仓库 ----
+# 用 _upstream/build_dgr.bat 自行拉取并编译即可
+_upstream/diff-gaussian-rasterization-main/
+_upstream/glm-master/
+_upstream/_ext/
+_upstream/*.tar.gz
+# 但保留与官方实现对比的验证脚本（记录了如何做基准对照）
+!_upstream/compare_official.py
+_upstream/debug_grad*.py
+_upstream/debug_pixels.py
+_upstream/debug_opacity.py
+_upstream/debug_scale.py
+_upstream/debug_train_step.py
+_upstream/diagnose_backend.py
+_upstream/diagnose_densify.py
+_upstream/test_official.py
+_upstream/graphics_utils.py
+_upstream/general_utils.py
+_upstream/sh_utils.py
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

@@ -20,29 +20,54 @@ from .dataset import SyntheticDataset
 from .gaussian_model import GaussianModel
 from .metrics import d_ssim_loss, psnr, ssim
 from .rasterizer import build_cov3d, compute_colors, project_gaussians, rasterize
+from .rasterizer_cuda import official_available
+
+
+def _render_official(*args, **kwargs):
+    from .rasterizer_cuda import render_official
+
+    return render_official(*args, **kwargs)
 
 SSIM_LAMBDA = 0.2
 
 
-def render_view(model: GaussianModel, cam, background, K: int):
-    """渲染一个视角，同时把投影结果返回（训陈循环需要读它的梯度）。"""
+def render_view(model: GaussianModel, cam, background, K: int, backend: str = "torch"):
+    """渲染一个视角。
+
+    两个后端返回的梯度来源不同，密度控制的阈值不能混用：
+      torch 后端 —— 读相机空间坐标 (cam_xy) 的梯度，官方阈值 2e-4 就是配它标定的
+      cuda  后端 —— 官方光栅化器只吐屏幕空间 means2D 的梯度，阈值同样是官方 2e-4，
+                    但量纲是像素，两者相差 fx/z 倍（本场景约 38 倍）
+    """
+    if backend == "cuda":
+        # +0 让它成为非叶子张量，retain_grad 才能留住梯度——这是官方的写法，
+        # 漏掉的话 means2d.grad 恒为 None，密度控制拿不到任何信号（densify 一次都不触发）
+        means2d = torch.zeros_like(model.get_xyz, requires_grad=True) + 0
+        if means2d.requires_grad:      # evaluate/preview 在 no_grad 下跑，不能 retain
+            means2d.retain_grad()
+        out, means2d, radii = _render_official(
+            model.get_xyz, model.get_rotation, model.get_scaling,
+            model._opacity, model.get_features, cam, background,
+            sh_degree=model.active_sh_degree, means2d=means2d,
+        )
+        return out, means2d, radii
+
     colors = compute_colors(model.get_xyz, model.get_features, cam, model.active_sh_degree)
     cov3d = build_cov3d(model.get_rotation, model.get_scaling)
     proj = project_gaussians(model.get_xyz, cov3d, cam)
     if proj.cam_xy.requires_grad:
-        # 非叶子张量默认不保留 .grad，训练循环要读相机空间位置梯度做密度控制
         proj.cam_xy.retain_grad()
     out = rasterize(proj, colors, model._opacity, cam, background, K=K)
-    return out, proj
+    return out, proj, proj.radius
 
 
 @torch.no_grad()
-def evaluate(model: GaussianModel, ds: SyntheticDataset, K: int, indices=None):
+def evaluate(model: GaussianModel, ds, K: int, indices=None, backend: str = "torch"):
     indices = ds.test_indices if indices is None else indices
     psnrs, ssims = [], []
     for i in indices:
         cam = ds.camera(i)
-        out, _ = render_view(model, cam, ds.background, K)
+        out, _, _ = render_view(model, cam, ds.background, K, backend)
         img = out.image.clamp(0.0, 1.0)
         gt = ds.image(i)
         psnrs.append(psnr(img, gt))
@@ -50,13 +75,14 @@ def evaluate(model: GaussianModel, ds: SyntheticDataset, K: int, indices=None):
     return float(np.mean(psnrs)), float(np.mean(ssims))
 
 
-def save_preview(model, ds, path: Path, K: int, index: int | None = None, train_view: bool = False):
+def save_preview(model, ds, path: Path, K: int, index: int | None = None,
+                 train_view: bool = False, backend: str = "torch"):
     """保存 GT / 渲染 的对比图，便于人眼检查。"""
     if index is None:
         index = ds.train_indices[0] if train_view else ds.test_indices[0]
     with torch.no_grad():
         cam = ds.camera(index)
-        out, _ = render_view(model, cam, ds.background, K)
+        out, _, _ = render_view(model, cam, ds.background, K, backend)
         img = out.image.clamp(0.0, 1.0)
     gt = ds.image(index)
     strip = torch.cat([gt, img], dim=2).permute(1, 2, 0).cpu().numpy()
@@ -69,6 +95,9 @@ def train(args) -> dict:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "preview").mkdir(parents=True, exist_ok=True)
+
+    if args.backend == "cuda" and not official_available():
+        raise RuntimeError("官方 CUDA 光栅化器不可用，请先跑 _upstream/build_dgr.bat")
 
     ds = build_dataset(args, device)
     if args.limit_views:
@@ -105,7 +134,7 @@ def train(args) -> dict:
         gt = ds.image(idx)
 
         model.update_learning_rate(it - 1)
-        out, proj = render_view(model, cam, ds.background, args.K)
+        out, proj, radii_from_backend = render_view(model, cam, ds.background, args.K, args.backend)
         img = out.image
         ll1 = torch.abs(img - gt).mean()
         loss = (1.0 - SSIM_LAMBDA) * ll1 + SSIM_LAMBDA * d_ssim_loss(img.unsqueeze(0), gt.unsqueeze(0))
@@ -114,10 +143,18 @@ def train(args) -> dict:
 
         # 屏幕空间位置梯度：判断哪些区域表达不足
         with torch.no_grad():
-            model.add_densification_stats(proj.cam_xy.grad, proj.valid)
-            model.max_radii2D[proj.valid] = torch.maximum(
-                model.max_radii2D[proj.valid], proj.radius[proj.valid].detach()
-            )
+            if args.backend == "cuda":
+                # 官方光栅化器只吐屏幕空间 means2D 的梯度（像素量纲）
+                g = proj.grad[:, :2]
+                valid = radii_from_backend > 0
+                radius = radii_from_backend.float()
+            else:
+                # 本实现给的是相机空间坐标的梯度
+                g = proj.cam_xy.grad
+                valid = proj.valid
+                radius = proj.radius
+            model.add_densification_stats(g, valid)
+            model.max_radii2D[valid] = torch.maximum(model.max_radii2D[valid], radius[valid].detach())
 
         model.optimizer.step()
         model.optimizer.zero_grad(set_to_none=True)
@@ -128,7 +165,7 @@ def train(args) -> dict:
         # 显存保护：稠密合成张量的规模由片元总数决定，真实场景的高斯会持续膨胀，
         # 实测 1250 步时片元冲到 2300 万（每像素 100 个）直接把 8GB 撑爆。
         # 超限就砍掉屏幕覆盖最大的那批高斯——它们正是贡献片元最多的一批。
-        if out.num_fragments > args.max_fragments:
+        if args.backend == "torch" and out.num_fragments > args.max_fragments:
             n = model.num_gaussians
             k = max(1, int(n * args.emergency_prune_frac))
             _, worst = torch.topk(proj.radius.detach(), k)
@@ -182,17 +219,18 @@ def train(args) -> dict:
             model.save_ply(out_dir / "ckpt" / f"iter_{it:05d}.ply")
 
         if it % args.eval_interval == 0 or it == args.iters:
-            p, s = evaluate(model, ds, args.K)
-            tr_p, _ = evaluate(model, ds, args.K, indices=ds.train_indices)
+            p, s = evaluate(model, ds, args.K, backend=args.backend)
+            tr_p, _ = evaluate(model, ds, args.K, indices=ds.train_indices, backend=args.backend)
             print(f"[{it:5d}] >>> 测试集 PSNR {p:.2f} dB  SSIM {s:.4f}  |  训练集 PSNR {tr_p:.2f} dB"
                   f"  (基线 {baseline:.2f} dB)")
-            save_preview(model, ds, out_dir / "preview" / f"iter_{it:05d}.png", args.K, train_view=True)
+            save_preview(model, ds, out_dir / "preview" / f"iter_{it:05d}.png", args.K,
+                         train_view=True, backend=args.backend)
 
     log_f.close()
 
     ply_path = out_dir / "point_cloud.ply"
     model.save_ply(ply_path)
-    final_psnr, final_ssim = evaluate(model, ds, args.K)
+    final_psnr, final_ssim = evaluate(model, ds, args.K, backend=args.backend)
     summary = {
         "iters": args.iters,
         "gaussians": model.num_gaussians,
@@ -238,6 +276,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="3DGS 训练")
     ap.add_argument("--data", default="data/synthetic")
     ap.add_argument("--dataset", default="auto", choices=["auto", "synthetic", "colmap"])
+    ap.add_argument("--backend", default="torch", choices=["torch", "cuda"],
+                    help="torch=自写的纯 PyTorch 光栅化器；cuda=官方 diff-gaussian-rasterization")
     ap.add_argument("--out", default="output/synthetic")
     ap.add_argument("--iters", type=int, default=3000)
     ap.add_argument("--downscale", type=int, default=2)

@@ -366,6 +366,80 @@ _env_probe/             环境探测脚本与结果记录
 
 ---
 
+
+---
+
+## 十、CUDA 后端（从 22.5 到 26.8 dB 的那一步）
+
+纯 PyTorch 实现的天花板是 K 截断，实测无法通过调参突破：
+
+| 尝试 | 结果 |
+|---|---|
+| 提高 K（20→32→64） | 峰值从 18.4 抬到 22.5 dB，但 1500 步后照样崩 |
+| 增加步数（跑到 6000 步） | **无效**，周期性震荡下行，回不到峰值 |
+| 无条件拆分过大高斯 | **无效**，PSNR 全程落后 1.5~2 dB |
+
+于是接入官方 `diff-gaussian-rasterization` 作为加速后端（`--backend cuda`）。
+**同一份木桩数据，同一个网络结构，只换光栅化器**：
+
+| | torch 后端 | **cuda 后端** |
+|---|---|---|
+| 峰值 PSNR | 22.51 dB | **26.82 dB** |
+| SSIM | 0.849 | **0.904** |
+| 训练趋势 | 1500 步后崩溃 | **持续上升** |
+| 速度 | 5 iter/s | **89 iter/s** |
+| 6000 步耗时 | 崩在半路 | **1.1 分钟** |
+
+单视角对比（同一模型）：23.76 / **32.29** / 15.48 dB。
+
+### 编译官方扩展
+
+源码：`graphdeco-inria/diff-gaussian-rasterization`（主仓库子模块）+ `g-truc/glm`。
+`git clone` 官方仓库在本网络下 TLS 失败（推自己的仓库却正常），改用 `codeload.github.com` 下 tarball。
+
+配方见 `_upstream/build_dgr.bat`（RTX 5060 / sm_120 实测通过）：
+
+```
+CUDA_HOME            = .../CUDA/v13.4
+vcvars64 + MSVC 14.44
+NVCC_PREPEND_FLAGS   = -Xcompiler /Zc:preprocessor    # CUDA 13 的 CCCL 强制要求
+DISTUTILS_USE_SDK=1, MSSdk=1                          # torch 的环境检查要
+TORCH_CUDA_ARCH_LIST = 12.0
+```
+
+### 接入时踩的坑：opacity 的语义差一层
+
+官方核（`forward.cu:343`）是：
+
+```cpp
+float alpha = min(0.99f, con_o.w * exp(power));   // 直接乘，没有 sigmoid
+if (alpha < 1.0f / 255.0f) continue;             // 太小就整条剔除
+```
+
+**它期望的 `opacities` 已经是概率值**（官方传 `pc.get_opacity` = sigmoid(_opacity)），
+而本实现内部约定传 logit。照搬自己的约定喂进去，初始 opacity=0.1 对应 logit=−2.197，
+算出的 alpha 是**负数**，于是：
+
+- 渲染输出**精确等于背景**（一个高斯都没画上）
+- 梯度**恒为 0**，参数完全冻结，PSNR 一动不动卡在 14.66
+- 而 `load_ply` 加载的已训练模型 logit 均值为正，所以能正常渲染
+  —— 表现为「加载已有模型能出图，从头训练却完全不动」，非常容易误判成后端坏了
+
+修法：包装层补一次 `torch.sigmoid`，保持与自写实现同签名。
+
+### 后端对比验证（同一模型、同一相机）
+
+| | 本实现 | 官方 CUDA |
+|---|---|---|
+| 速度 | 391 ms | **1.5 ms** |
+| 图像 mean 差异 | 0.039（相对亮度约 7.6%） | 基准 |
+
+视觉上两者几乎一致，差异集中在物体边缘与桌面高频细节。
+**注意**：这个差异**不是** K 截断造成的——K 从 64 加到 256 差异卡在 0.0385 不再下降
+（代价是显存从 2.0GB 涨到 6.5GB）。
+
+---
+
 ## 参考
 
 - 原论文：Kerbl, Kopanas, Leimkühler, Drettakis. *3D Gaussian Splatting for Real-Time Radiance Field Rendering*. SIGGRAPH 2023.
