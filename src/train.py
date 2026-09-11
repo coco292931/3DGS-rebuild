@@ -218,13 +218,17 @@ def train(args) -> dict:
             (out_dir / "ckpt").mkdir(parents=True, exist_ok=True)
             model.save_ply(out_dir / "ckpt" / f"iter_{it:05d}.ply")
 
+        # 实时预览：看板轮询 preview/ 目录拿最新一张，训练中就能看到画面在变好
+        pi = args.preview_interval or args.eval_interval
+        if pi and it % pi == 0:
+            save_preview(model, ds, out_dir / "preview" / f"iter_{it:05d}.png", args.K,
+                         train_view=True, backend=args.backend)
+
         if it % args.eval_interval == 0 or it == args.iters:
             p, s = evaluate(model, ds, args.K, backend=args.backend)
             tr_p, _ = evaluate(model, ds, args.K, indices=ds.train_indices, backend=args.backend)
             print(f"[{it:5d}] >>> 测试集 PSNR {p:.2f} dB  SSIM {s:.4f}  |  训练集 PSNR {tr_p:.2f} dB"
                   f"  (基线 {baseline:.2f} dB)")
-            save_preview(model, ds, out_dir / "preview" / f"iter_{it:05d}.png", args.K,
-                         train_view=True, backend=args.backend)
 
     log_f.close()
 
@@ -301,6 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log-interval", type=int, default=50)
     ap.add_argument("--eval-interval", type=int, default=500)
     ap.add_argument("--ckpt-interval", type=int, default=300)
+    ap.add_argument("--preview-interval", type=int, default=0,
+                    help="每隔多少步写一张预览图（看板实时预览用；0 表示跟随 eval-interval）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--limit-views", type=int, default=0, help="只用前 N 个训练视角（过拟合诊断）")
     ap.add_argument("--init-scale-factor", type=float, default=1.0,

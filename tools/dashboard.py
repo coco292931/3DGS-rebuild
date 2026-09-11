@@ -189,22 +189,31 @@ def start_job(kind: str, args: dict) -> dict:
         ds = str(args["dataset"])
         backend = args.get("backend", "cuda")
         out_name = args.get("out") or f"ui_{ds}"
+        iters = int(args.get("iters", 30000))
+        ckpt = int(args.get("ckpt_interval", 5000))
+        preview = int(args.get("preview_interval", 500))
         cmd = [
             sys.executable, "-u", "-m", "src.train",
             "--data", f"data/{ds}",
-            "--backends" if False else "--backend", backend,
-            "--iters", str(args.get("iters", 30000)),
+            "--backend", backend,
+            "--iters", str(iters),
             "--downscale", str(args.get("downscale", 2)),
             "--out", f"output/{out_name}",
             "--init-scale-factor", str(args.get("init_scale", 1.0)),
             "--max-gaussians", str(args.get("max_gaussians", 60000)),
-            "--densify-until", str(args.get("densify_until", 15000)),
+            "--densify-until", str(int(iters * 0.5)),
             "--opacity-reset-interval", str(args.get("opacity_reset", 3000)),
-            "--ckpt-interval", "5000", "--log-interval", "500", "--eval-interval", "5000",
+            "--ckpt-interval", str(ckpt),
+            "--preview-interval", str(preview),
+            "--log-interval", str(max(100, iters // 60)),
+            "--eval-interval", str(max(500, iters // 6)),
         ]
         if backend == "torch":
             cmd += ["--K", str(args.get("K", 64)), "--max-fragments", "16000000"]
-        cmd_short = f"训练 {ds} · {backend} · {args.get('iters', 30000)} 步"
+        parts = [f"训练 {ds}", backend, f"{iters} 步"]
+        if ckpt: parts.append(f"ckpt/{ckpt}")
+        if preview: parts.append(f"预览/{preview}")
+        cmd_short = " · ".join(parts)
     elif kind == "sfm":
         ds = str(args["dataset"])
         cmd = [sys.executable, "-u", "tools/run_sfm.py", f"data/{ds}", "--stage", "all", "--sequential"]
@@ -219,6 +228,129 @@ def start_job(kind: str, args: dict) -> dict:
     JOBS[name] = {"proc": proc, "kind": kind, "cmd_short": cmd_short,
                   "started": time.strftime("%H:%M:%S"), "log": str(log_path)}
     return {"id": name, "cmd": cmd_short}
+
+
+
+# ---------------------------------------------------------------------------
+# 视频导入：扫描候选视频 -> 抽帧 -> SfM
+# ---------------------------------------------------------------------------
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".MP4", ".MOV"}
+SCAN_DIRS = [
+    ROOT.parent,                       # Downloads
+    ROOT.parent / "3d-rebuild",
+    ROOT.parent / "Videos",
+    ROOT / "videos",
+]
+FFMPEG = None
+for _c in [Path(r"C:\Users\tonyp\Downloads\FFmpeg\bin\ffmpeg.exe"),
+           Path("ffmpeg"), Path("ffmpeg.exe")]:
+    if isinstance(_c, Path) and _c.exists():
+        FFMPEG = str(_c)
+        break
+    if not isinstance(_c, Path):
+        FFMPEG = str(_c)
+        break
+
+
+def scan_videos() -> list[dict]:
+    """扫描常见目录下的视频，标注是否已经导入过。"""
+    seen, out = set(), []
+    imported = {d.name for d in (ROOT / "data").iterdir()} if (ROOT / "data").exists() else set()
+    for base in SCAN_DIRS:
+        if not base.exists():
+            continue
+        try:
+            files = [p for p in base.iterdir() if p.is_file() and p.suffix in VIDEO_EXTS]
+        except Exception:
+            continue
+        for p in files[:40]:
+            key = str(p.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            st = p.stat()
+            # 猜一个数据集名：文件名去掉扩展、非字母数字压成下划线
+            guess = re.sub(r"[^0-9A-Za-z_]+", "_", p.stem)[:40] or "video"
+            out.append({
+                "name": p.name,
+                "path": str(p),
+                "dir": base.name,
+                "size_mb": round(st.st_size / 1e6, 1),
+                "mtime": time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime)),
+                "guess_dataset": guess,
+                "imported": guess in imported,
+            })
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    return out[:40]
+
+
+def probe_video(path: str) -> dict:
+    """读分辨率/时长，用于导入前给用户确认。"""
+    import subprocess
+
+    ffprobe = str(Path(FFMPEG).with_name("ffprobe.exe")) if FFMPEG else "ffprobe"
+    try:
+        r = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate",
+             "-show_entries", "format=duration", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=30)
+        d = json.loads(r.stdout)
+        st = d["streams"][0]
+        return {"width": st["width"], "height": st["height"],
+                "duration": round(float(d["format"]["duration"]), 1)}
+    except Exception as e:
+        return {"error": str(e)[:120]}
+
+
+def import_video(args: dict) -> dict:
+    """抽帧 + SfM，产出一个可直接训练的数据集。"""
+    import subprocess
+
+    src = Path(args["path"])
+    if not src.exists():
+        raise FileNotFoundError(f"视频不存在：{src}")
+    name = re.sub(r"[^0-9A-Za-z_]+", "_", args.get("name") or src.stem)[:40] or "video"
+    fps = float(args.get("fps", 6))
+    scale = int(args.get("scale", 1280))
+
+    ds = ROOT / "data" / name
+    frames = ds / "frames"
+    frames.mkdir(parents=True, exist_ok=True)
+    for old in frames.glob("*.png"):
+        old.unlink()
+
+    def run(cmd, log):
+        p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+        log.append("$ " + " ".join(str(c) for c in cmd))
+        tail = (p.stdout or "")[-800:] + (p.stderr or "")[-800:]
+        log.append(tail.strip()[-800:])
+        if p.returncode != 0:
+            raise RuntimeError(f"命令失败({p.returncode}): " + " ".join(str(c) for c in cmd[:3]))
+
+    log: list[str] = []
+    # 抽帧。fps 必须够密——手持转半秒能转过二十几度，帧间视差过大会直接匹配失败。
+    run([FFMPEG, "-y", "-v", "error", "-i", str(src),
+         "-vf", f"fps={fps},scale={scale}:-1", "-q:v", "2",
+         str(frames / "frame_%04d.png")], log)
+    n = len(list(frames.glob("*.png")))
+    if n < 12:
+        raise RuntimeError(f"只抽出 {n} 帧，太少，无法重建")
+
+    for stage in ("features", "match", "map"):
+        cmd = [sys.executable, "-u", "tools/run_sfm.py", f"data/{name}", "--stage", stage]
+        if stage == "match":
+            cmd.append("--sequential")
+        run(cmd, log)
+
+    n_reg = -1
+    try:
+        import pycolmap
+        n_reg = pycolmap.Reconstruction(str(ColmapDataset._find_model(ds))).num_reg_images()
+    except Exception:
+        pass
+    return {"dataset": name, "frames": n, "registered": n_reg, "log": "\n".join(log)[-1500:]}
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "3dgs-dashboard/1.0"
@@ -244,6 +376,14 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception as e:
             return self._json({"error": f"bad body: {e}"}, 400)
+
+        if path == "/api/import":
+            if not body.get("path"):
+                return self._json({"error": "缺少 path"}, 400)
+            try:
+                return self._json(import_video(body))
+            except Exception as e:
+                return self._json({"error": str(e)[:300]}, 500)
 
         if path == "/api/train":
             if not body.get("dataset"):
@@ -307,6 +447,22 @@ class Handler(BaseHTTPRequestHandler):
         # ---- 数据集与训练任务 ----
         if path == "/api/datasets":
             return self._json({"datasets": scan_datasets(), "jobs": list_jobs()})
+
+        if path == "/api/videos":
+            return self._json({"videos": scan_videos(), "ffmpeg": FFMPEG})
+
+        if path == "/api/previews":
+            q = self.path.split("?", 1)[1] if "?" in self.path else ""
+            name = dict(x.split("=", 1) for x in q.split("&") if "=" in x).get("name", "")
+            d = OUTPUT_ROOT / name / "preview"
+            files = sorted(d.glob("*.png"), key=_ckpt_iter) if d.exists() else []
+            return self._json({"files": [f.name for f in files],
+                               "latest": files[-1].name if files else None})
+
+        if path == "/api/probe":
+            q = self.path.split("?", 1)[1] if "?" in self.path else ""
+            p = dict(x.split("=", 1) for x in q.split("&") if "=" in x).get("path", "")
+            return self._json(probe_video(unquote(p)))
 
         if path == "/api/joblog":
             q = self.path.split("?", 1)[1] if "?" in self.path else ""

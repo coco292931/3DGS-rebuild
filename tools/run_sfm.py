@@ -56,8 +56,16 @@ def main() -> int:
         print(f"  平均重投影误差 {best.compute_mean_reprojection_error():.3f} px")
         if best.num_reg_images() < n_frames * 0.5:
             print(f"  !! 只有 {best.num_reg_images()}/{n_frames} 帧注册成功，位姿质量堪忧")
-        best.write(str(root / "best_model"))
-        print(f"已写出 {root / 'best_model'}")
+        # 模型本身已经写在 sparse/ 下（ColmapDataset 会自动挑注册图像最多的那个）。
+        # 这里只是额外导出一份便于外部工具读取；失败不该中断流程——
+        # 之前这里没建目录，直接抛 ValueError 把整条导入链路带崩过。
+        try:
+            extra = root / "best_model"
+            extra.mkdir(parents=True, exist_ok=True)
+            best.write(str(extra))
+            print(f"已写出 {extra}")
+        except Exception as e:
+            print(f"（附加导出失败，不影响后续训练：{str(e)[:120]}）")
     return 0
 
 

@@ -4,31 +4,31 @@
 <meta charset="utf-8">
 <title>3DGS 训练看板</title>
 <style>
-  :root{
-    --bg:#0d1016; --panel:#141922; --line:#232b38; --text:#dfe6f0;
-    --dim:#8394a8; --accent:#7fb2ff; --ok:#4ec98a; --warn:#ffb454; --bad:#ff7b7b;
-  }
+  :root{--bg:#0d1016;--panel:#141922;--line:#232b38;--text:#dfe6f0;--dim:#8394a8;
+        --accent:#7fb2ff;--ok:#4ec98a;--warn:#ffb454;--bad:#ff7b7b;}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
     font:13px/1.6 "Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
-  #top{height:46px;display:flex;align-items:center;gap:14px;padding:0 16px;
+  #top{height:46px;display:flex;align-items:center;gap:12px;padding:0 16px;
     border-bottom:1px solid var(--line);background:var(--panel)}
   #top h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.5px}
   #top .sp{flex:1}
   button{background:#1c2634;color:var(--text);border:1px solid var(--line);
-    border-radius:5px;padding:5px 12px;cursor:pointer;font:inherit}
-  button:hover{border-color:var(--accent);color:#fff}
-  button.on{background:#1d3category;border-color:var(--accent)}
+    border-radius:5px;padding:4px 10px;cursor:pointer;font:inherit}
+  button:hover:not(:disabled){border-color:var(--accent);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:#1f4f8f;border-color:#3d7fd6;color:#fff}
+  button.sm{padding:2px 8px;font-size:11px}
   #main{display:flex;height:calc(100% - 46px)}
-  #left{width:250px;border-right:1px solid var(--line);overflow:auto;background:#111620}
-  #mid{flex:1;position:relative;background:#0a0d12}
-  #right{width:330px;border-left:1px solid var(--line);overflow:auto;background:#111620}
+  #left{width:270px;border-right:1px solid var(--line);overflow:auto;background:#111620;flex:none}
+  #mid{flex:1;position:relative;background:#0a0d12;display:flex;flex-direction:column}
+  #right{width:330px;border-left:1px solid var(--line);overflow:auto;background:#111620;flex:none}
   iframe{width:100%;height:100%;border:0;display:block}
-  .sec{padding:10px 12px;border-bottom:1px solid var(--line)}
-  .sec h2{font-size:11px;margin:0 0 8px;color:var(--dim);font-weight:600;
-    letter-spacing:1px;text-transform:uppercase}
-  .item{padding:7px 9px;border-radius:5px;cursor:pointer;display:flex;
-    align-items:center;gap:7px;margin-bottom:3px;border:1px solid transparent}
+  .sec{padding:9px 11px;border-bottom:1px solid var(--line)}
+  .sec h2{font-size:11px;margin:0 0 7px;color:var(--dim);font-weight:600;
+    letter-spacing:1px;text-transform:uppercase;display:flex;justify-content:space-between}
+  .item{padding:6px 8px;border-radius:5px;cursor:pointer;display:flex;align-items:center;
+    gap:7px;margin-bottom:2px;border:1px solid transparent}
   .item:hover{background:#1a2230}
   .item.sel{background:#1b2c45;border-color:var(--accent)}
   .dot{width:7px;height:7px;border-radius:50%;background:#3a4453;flex:none}
@@ -43,30 +43,33 @@
   .kv span:last-child{font-family:Consolas,monospace}
   .big{font:600 22px/1.2 Consolas,monospace;color:var(--accent)}
   #log{font:11px/1.5 Consolas,monospace;color:#9fb0c4;white-space:pre-wrap;
-    max-height:230px;overflow:auto;background:#0b0f16;border-radius:5px;padding:8px}
-  #curve{width:100%;height:150px;display:block;background:#0b0f16;border-radius:5px}
-  .empty{color:var(--dim);padding:20px;text-align:center;font-size:12px}
+    max-height:200px;overflow:auto;background:#0b0f16;border-radius:5px;padding:8px}
+  #curve{width:100%;height:140px;display:block;background:#0b0f16;border-radius:5px}
+  .empty{color:var(--dim);padding:14px;text-align:center;font-size:12px}
   #note{color:var(--dim);font-size:11px}
-  #modal{position:fixed;inset:0;background:rgba(6,9,14,.72);display:none;
-    align-items:center;justify-content:center;z-index:100}
-  #modalbox{width:420px;background:var(--panel);border:1px solid var(--line);
-    border-radius:10px;padding:20px 22px}
-  #modalbox h3{margin:0 0 16px;font-size:15px}
-  #modalbox label{display:block;margin-bottom:12px;color:var(--dim);font-size:12px}
-  #modalbox select,#modalbox input{width:100%;margin-top:5px;padding:7px 9px;
-    background:#0e141c;color:var(--text);border:1px solid var(--line);border-radius:5px;font:inherit}
-  #modalbox .row{display:flex;gap:10px;margin-top:18px}
-  button.primary{background:#1f4f8f;border-color:#3d7fd6;color:#fff}
-  .ds{padding:6px 8px;border-radius:5px;cursor:pointer;margin-bottom:3px}
-  .ds:hover{background:#1a2230}
-  .ds .t{display:flex;justify-content:space-between}
-  .tag{font-size:10px;padding:1px 6px;border-radius:8px;background:#1d2a3d;color:#8fb4e0}
+  .tag{font-size:10px;padding:1px 6px;border-radius:8px;background:#1d2a3d;color:#8fb4e0;flex:none}
   .tag.ok{background:#16321f;color:#5fd08a}
   .tag.no{background:#33201f;color:#e08a8a}
-  .job{padding:6px 8px;border-radius:5px;margin-bottom:4px;background:#0e141c;font-size:12px}
-  .job .t{display:flex;justify-content:space-between;gap:8px}
-  .job .l{color:var(--dim);font:10px/1.4 Consolas,monospace;max-height:72px;
-    overflow:auto;white-space:pre-wrap;margin-top:4px}
+  .row{display:flex;gap:6px;margin-top:5px}
+  #tabs{height:32px;display:flex;gap:2px;padding:4px 6px 0;background:#0e131b;border-bottom:1px solid var(--line)}
+  .tab{padding:3px 14px;border-radius:5px 5px 0 0;cursor:pointer;font-size:12px;color:var(--dim)}
+  .tab.on{background:#0a0d12;color:var(--text)}
+  #stage{flex:1;position:relative;overflow:hidden}
+  #liveWrap{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    background:#0a0d12;padding:8px}
+  #liveWrap img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
+  #modal{position:fixed;inset:0;background:rgba(6,9,14,.72);display:none;
+    align-items:center;justify-content:center;z-index:100}
+  #modalbox{width:430px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:20px 22px}
+  #modalbox h3{margin:0 0 16px;font-size:15px}
+  #modalbox label{display:block;margin-bottom:11px;color:var(--dim);font-size:12px}
+  #modalbox select,#modalbox input{width:100%;margin-top:4px;padding:6px 9px;
+    background:#0e141c;color:var(--text);border:1px solid var(--line);border-radius:5px;font:inherit}
+  #modalbox .row{margin-top:16px}
+  #toast2{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);
+    padding:8px 18px;border-radius:18px;background:rgba(20,28,40,.95);color:#dfe6f0;
+    font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:200}
 </style>
 </head>
 <body>
@@ -75,35 +78,20 @@
   <span id="note">—</span>
   <div class="sp"></div>
   <button id="newtrain">＋ 新建训练</button>
-  <button id="autobtn" class="on">自动刷新：开</button>
-  <button id="refresh">立即刷新</button>
-</div>
-
-<div id="modal">
-  <div id="modalbox">
-    <h3>新建训练</h3>
-    <label>数据集 <select id="f_dataset"></select></label>
-    <label>后端 <select id="f_backend">
-      <option value="cuda">cuda（官方加速后端，快，质量高）</option>
-      <option value="torch">torch（纯 PyTorch 自写实现）</option>
-    </select></label>
-    <label>训练步数 <input id="f_iters" type="number" value="30000"></label>
-    <label>下采样 <select id="f_downscale">
-      <option value="2">2（640×360，推荐）</option>
-      <option value="1">1（原始分辨率，慢 4 倍）</option>
-      <option value="3">3（更快，细节少）</option>
-    </select></label>
-    <label>输出名 <input id="f_out" type="text" placeholder="留空自动命名"></label>
-    <div class="row">
-      <button id="f_start" class="primary">开始训练</button>
-      <button id="f_cancel">取消</button>
-    </div>
-    <div id="f_msg" class="meta"></div>
-  </div>
+  <button id="autobtn">自动刷新：开</button>
+  <button id="refresh">刷新</button>
 </div>
 
 <div id="main">
   <div id="left">
+    <div class="sec">
+      <h2>数据集 <span class="meta" id="dsHint">点选后可训练</span></h2>
+      <div id="datasets"><div class="empty">扫描中…</div></div>
+    </div>
+    <div class="sec">
+      <h2>可导入的视频</h2>
+      <div id="videos"><div class="empty">扫描中…</div></div>
+    </div>
     <div class="sec">
       <h2>训练运行</h2>
       <div id="runs"><div class="empty">扫描中…</div></div>
@@ -113,18 +101,23 @@
       <div id="cks"><div class="empty">先选一个运行</div></div>
     </div>
     <div class="sec">
-      <h2>数据集</h2>
-      <div id="datasets"><div class="empty">扫描中…</div></div>
-    </div>
-    <div class="sec">
       <h2>任务</h2>
       <div id="jobs"><div class="empty">暂无任务</div></div>
     </div>
   </div>
 
   <div id="mid">
-    <div id="viewerHint" class="empty" style="padding-top:80px">选一个 checkpoint 预览</div>
-    <iframe id="viewer" style="display:none"></iframe>
+    <div id="tabs">
+      <div class="tab on" data-t="3d">3D 预览</div>
+      <div class="tab" data-t="live">训练实时预览</div>
+    </div>
+    <div id="stage">
+      <div id="viewerHint" class="empty" style="padding-top:70px">
+        选一个 checkpoint 看三维效果，或切到「训练实时预览」看训练中的渲染
+      </div>
+      <iframe id="viewer" style="display:none"></iframe>
+      <div id="liveWrap"><img id="liveImg" alt="训练预览"></div>
+    </div>
   </div>
 
   <div id="right">
@@ -133,8 +126,8 @@
       <div id="metrics"><div class="empty">—</div></div>
     </div>
     <div class="sec">
-      <h2>训练曲线（loss，越低越好）</h2>
-      <canvas id="curve" width="640" height="300"></canvas>
+      <h2>训练曲线（loss）</h2>
+      <canvas id="curve" width="640" height="280"></canvas>
       <div class="meta" id="curveNote"></div>
     </div>
     <div class="sec">
@@ -144,37 +137,195 @@
   </div>
 </div>
 
+<div id="modal">
+  <div id="modalbox">
+    <h3>新建训练</h3>
+    <label>数据集 <select id="f_dataset"></select></label>
+    <label>后端 <select id="f_backend">
+      <option value="cuda">cuda — 官方加速后端（快、质量高，推荐）</option>
+      <option value="torch">torch — 纯 PyTorch 自写实现（仅用于对照）</option>
+    </select></label>
+    <label>训练步数 <input id="f_iters" type="number" value="30000"></label>
+    <label>下采样 <select id="f_downscale">
+      <option value="2">2 — 640×360（推荐）</option>
+      <option value="1">1 — 原始分辨率（慢 4 倍）</option>
+      <option value="3">3 — 更快，细节少</option>
+    </select></label>
+    <label>Checkpoint 间隔 <select id="f_ckpt">
+      <option value="5000">每 5000 步（默认）</option>
+      <option value="2000">每 2000 步（密）</option>
+      <option value="10000">每 10000 步（疏）</option>
+      <option value="0">不保存中间档，只留最终模型</option>
+    </select></label>
+    <label>实时预览间隔 <select id="f_preview">
+      <option value="500">每 500 步（流畅）</option>
+      <option value="2000">每 2000 步</option>
+      <option value="5000">每 5000 步</option>
+      <option value="0">关闭</option>
+    </select></label>
+    <label>输出名 <input id="f_out" type="text" placeholder="留空自动命名"></label>
+    <div class="row">
+      <button id="f_start" class="primary">开始训练</button>
+      <button id="f_cancel">取消</button>
+    </div>
+    <div id="f_msg" class="meta"></div>
+  </div>
+</div>
+<div id="toast2"></div>
+
 <script>
 const $ = id => document.getElementById(id);
-let state = { runs: [], datasets: [], jobs: [], selRun: null, selCkpt: null, auto: true, log: [] };
+let state = { runs: [], datasets: [], videos: [], jobs: [], selRun: null, selCkpt: null,
+              selDataset: null, auto: true, log: [], tab: '3d' };
 
 async function api(path) {
   const r = await fetch(path + (path.includes('?') ? '&' : '?') + 't=' + Date.now());
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+async function post(path, obj) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(obj) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+function toast(msg) {
+  const el = $('toast2');
+  el.textContent = msg; el.style.opacity = '1';
+  clearTimeout(el._t); el._t = setTimeout(() => el.style.opacity = '0', 1800);
+}
 
-async function refreshRuns() {
+// ---------------- 数据集（可交互） ----------------
+async function refreshAll() {
   try {
-    const d = await api('/api/runs');
-    state.runs = d.runs;
-    $('note').textContent = `${d.runs.length} 个运行 · 更新于 ${d.time}`;
+    const runs = await api('/api/runs');
+    state.runs = runs.runs;
+    $('note').textContent = `${runs.runs.length} 个运行 · ${runs.time}`;
     renderRuns();
-  } catch (e) {
-    $('note').textContent = '无法连接后端：' + e.message;
+    if (!state.selRun && state.runs.length) selectRun(state.runs[0].name);
+  } catch (e) { $('note').textContent = '后端未连接：' + e.message; }
+  await refreshDatasets();
+  await refreshVideos();
+}
+
+async function refreshDatasets() {
+  try {
+    const d = await api('/api/datasets');
+    state.datasets = d.datasets || [];
+    state.jobs = d.jobs || [];
+    renderDatasets(); renderJobs(); renderDatasetOptions();
+  } catch (e) { $('datasets').innerHTML = '<div class="empty">' + e.message + '</div>'; }
+}
+
+function renderDatasets() {
+  const box = $('datasets');
+  if (!state.datasets.length) { box.innerHTML = '<div class="empty">data/ 下还没有数据集</div>'; return; }
+  box.innerHTML = '';
+  for (const d of state.datasets) {
+    const el = document.createElement('div');
+    el.className = 'item' + (state.selDataset === d.name ? ' sel' : '');
+    const tag = d.has_sfm
+      ? `<span class="tag ok">${d.registered} 帧</span>`
+      : `<span class="tag no">未求位姿</span>`;
+    el.innerHTML = `<div class="name">${d.name}<div class="meta">${d.images} 张图像</div></div>${tag}`;
+    el.onclick = () => { state.selDataset = d.name; renderDatasets();
+                         $('dsHint').textContent = '已选 ' + d.name; };
+    if (state.selDataset === d.name) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      if (d.has_sfm) {
+        const b = document.createElement('button');
+        b.className = 'sm primary'; b.textContent = '用这个数据集训练';
+        b.onclick = e => { e.stopPropagation(); openTrain(d.name); };
+        row.appendChild(b);
+      } else {
+        const b = document.createElement('button');
+        b.className = 'sm'; b.textContent = '求相机位姿（SfM）';
+        b.onclick = async e => {
+          e.stopPropagation();
+          try { const r = await post('/api/sfm', { dataset: d.name }); toast('已启动 ' + r.cmd); refreshDatasets(); }
+          catch (err) { toast('失败：' + err.message); }
+        };
+        row.appendChild(b);
+      }
+      el.appendChild(row);
+    }
+    box.appendChild(el);
   }
 }
 
+// ---------------- 视频导入 ----------------
+async function refreshVideos() {
+  try {
+    const d = await api('/api/videos');
+    state.videos = d.videos || [];
+    renderVideos();
+  } catch (e) { $('videos').innerHTML = '<div class="empty">' + e.message + '</div>'; }
+}
+
+function renderVideos() {
+  const box = $('videos');
+  if (!state.videos.length) { box.innerHTML = '<div class="empty">常见目录下没找到视频</div>'; return; }
+  box.innerHTML = '';
+  for (const v of state.videos) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = `<div class="name">${v.name}<div class="meta">${v.size_mb}MB · ${v.mtime}</div></div>
+      ${v.imported ? '<span class="tag ok">已导入</span>' : ''}`;
+    el.onclick = () => showImport(v);
+    box.appendChild(el);
+  }
+}
+
+let importTarget = null;
+function showImport(v) {
+  importTarget = v;
+  $('modal').style.display = 'flex';
+  $('modalbox').innerHTML = `
+    <h3>导入视频</h3>
+    <div class="meta" style="margin-bottom:12px">${v.path}</div>
+    <label>数据集名 <input id="i_name" value="${v.guess_dataset}"></label>
+    <label>抽帧频率 <select id="i_fps">
+      <option value="6">每秒 6 帧（推荐，视差小易匹配）</option>
+      <option value="4">每秒 4 帧</option>
+      <option value="10">每秒 10 帧（更密，SfM 慢）</option>
+    </select></label>
+    <label>抽帧宽度 <select id="i_scale">
+      <option value="1280">1280（推荐）</option>
+      <option value="960">960（快）</option>
+      <option value="1920">1920（原始）</option>
+    </select></label>
+    <div class="row">
+      <button id="i_go" class="primary">开始导入（抽帧 + 求位姿）</button>
+      <button id="i_cancel">取消</button>
+    </div>
+    <div id="i_msg" class="meta"></div>`;
+  $('i_cancel').onclick = () => { $('modal').style.display = 'none'; restoreModal(); };
+  $('i_go').onclick = async () => {
+    $('i_msg').textContent = '导入中…（抽帧 + SfM，通常 1~3 分钟）';
+    try {
+      const r = await post('/api/import', { path: v.path, name: $('i_name').value,
+                                            fps: parseFloat($('i_fps').value),
+                                            scale: parseInt($('i_scale').value, 10) });
+      $('i_msg').textContent = `完成：抽出 ${r.frames} 帧，注册 ${r.registered} 帧`;
+      toast('导入完成：' + r.dataset);
+      refreshDatasets();
+    } catch (e) { $('i_msg').textContent = '失败：' + e.message; }
+  };
+}
+function restoreModal() { location.reload(); }
+
+// ---------------- 运行 / checkpoint ----------------
 function renderRuns() {
   const box = $('runs');
-  if (!state.runs.length) { box.innerHTML = '<div class="empty">没有找到训练结果</div>'; return; }
+  if (!state.runs.length) { box.innerHTML = '<div class="empty">还没有训练结果</div>'; return; }
   box.innerHTML = '';
   for (const r of state.runs) {
     const el = document.createElement('div');
     el.className = 'item' + (state.selRun === r.name ? ' sel' : '');
-    const nck = r.checkpoints.length;
     el.innerHTML = `<i class="dot ${r.active ? 'live' : ''}"></i>
-      <div class="name">${r.name}<div class="meta">${nck} 个 ckpt · ${r.updated.slice(5, 16)}</div></div>`;
+      <div class="name">${r.name}<div class="meta">${r.checkpoints.length} ckpt · ${r.updated.slice(5, 16)}</div></div>`;
     el.onclick = () => selectRun(r.name);
     box.appendChild(el);
   }
@@ -185,7 +336,7 @@ function renderCks() {
   const run = state.runs.find(r => r.name === state.selRun);
   if (!run) { box.innerHTML = '<div class="empty">先选一个运行</div>'; return; }
   const list = [...run.checkpoints];
-  if (run.has_final) list.push({ name: 'point_cloud.ply', iter: 999999, size_mb: 0, final: true });
+  if (run.has_final) list.push({ name: 'point_cloud.ply', iter: 1e9, final: true });
   if (!list.length) { box.innerHTML = '<div class="empty">这个运行还没有 checkpoint</div>'; return; }
   box.innerHTML = '';
   for (const c of list) {
@@ -199,29 +350,147 @@ function renderCks() {
 }
 
 function selectRun(name) {
-  state.selRun = name;
-  state.selCkpt = null;
-  renderRuns(); renderCks();
-  loadRunDetail(name);
+  state.selRun = name; state.selCkpt = null;
+  renderRuns(); renderCks(); loadRunDetail(name);
 }
 
 function selectCkpt(file) {
   state.selCkpt = file;
   renderCks();
+  setTab('3d');
   const path = file === 'point_cloud.ply'
     ? `/model/${state.selRun}/point_cloud.ply`
     : `/model/${state.selRun}/ckpt/${file}`;
   $('viewerHint').style.display = 'none';
   const v = $('viewer');
-  // 首次加载才设 src；之后直接调查看器里的接口换模型，
-  // 这样**相机角度和距离保持不变**——对比不同 checkpoint 必须同一视角才有意义。
   if (v.style.display === 'none' || !v.contentWindow ||
       typeof v.contentWindow.loadModelKeepCamera !== 'function') {
     v.style.display = 'block';
     v.src = '/viewer.html?model=' + encodeURIComponent(path);
   } else {
-    v.contentWindow.loadModelKeepCamera(path);
+    v.contentWindow.loadModelKeepCamera(path);   // 保留相机，便于对比同一角度
   }
+}
+
+// ---------------- 实时预览 ----------------
+function setTab(t) {
+  state.tab = t;
+  document.querySelectorAll('.tab').forEach(e => e.classList.toggle('on', e.dataset.t === t));
+  const live = t === 'live';
+  $('liveWrap').style.display = live ? 'flex' : 'none';
+  $('viewer').style.display = (!live && state.selCkpt) ? 'block' : 'none';
+  $('viewerHint').style.display = (!live && !state.selCkpt) ? 'block' : 'none';
+  if (live) refreshLive();
+}
+document.querySelectorAll('.tab').forEach(e => e.onclick = () => setTab(e.dataset.t));
+
+let liveSig = '';
+async function refreshLive() {
+  if (state.tab !== 'live' || !state.selRun) return;
+  try {
+    const d = await api('/api/previews?name=' + encodeURIComponent(state.selRun));
+    if (!d.latest) { $('liveImg').removeAttribute('src'); return; }
+    const sig = d.latest + '|' + state.selRun;
+    if (sig !== liveSig) {
+      liveSig = sig;
+      $('liveImg').src = `/preview/${state.selRun}/${d.latest}?t=${Date.now()}`;
+      toast('预览更新：' + d.latest.replace('.png', ''));
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+// ---------------- 训练启动 ----------------
+function openTrain(ds) {
+  const sel = $('f_dataset');
+  if (ds) { sel.value = ds; }
+  $('modalbox').innerHTML = `<h3>新建训练</h3>
+    <label>数据集 <select id="f_dataset"></select></label>
+    <label>后端 <select id="f_backend">
+      <option value="cuda">cuda — 官方加速后端（推荐）</option>
+      <option value="torch">torch — 纯 PyTorch 自写实现（仅对照）</option>
+    </select></label>
+    <label>训练步数 <input id="f_iters" type="number" value="30000"></label>
+    <label>下采样 <select id="f_downscale">
+      <option value="2">2 — 640×360（推荐）</option>
+      <option value="1">1 — 原始分辨率（慢 4 倍）</option>
+      <option value="3">3 — 更快，细节少</option>
+    </select></label>
+    <label>Checkpoint 间隔 <select id="f_ckpt">
+      <option value="5000">每 5000 步（默认）</option>
+      <option value="2000">每 2000 步（密）</option>
+      <option value="10000">每 10000 步（疏）</option>
+      <option value="0">只保留最终模型</option>
+    </select></label>
+    <label>实时预览间隔 <select id="f_preview">
+      <option value="500">每 500 步（流畅）</option>
+      <option value="2000">每 2000 步</option>
+      <option value="5000">每 5000 步</option>
+      <option value="0">关闭</option>
+    </select></label>
+    <label>输出名 <input id="f_out" type="text" placeholder="留空自动命名"></label>
+    <div class="row">
+      <button id="f_start" class="primary">开始训练</button>
+      <button id="f_cancel">取消</button>
+    </div>
+    <div id="f_msg" class="meta"></div>`;
+  renderDatasetOptions();
+  if (ds) $('f_dataset').value = ds;
+  $('f_cancel').onclick = () => { $('modal').style.display = 'none'; restoreModal(); };
+  $('f_start').onclick = startTrain;
+  $('modal').style.display = 'flex';
+}
+
+async function startTrain() {
+  const body = {
+    dataset: $('f_dataset').value,
+    backend: $('f_backend').value,
+    iters: parseInt($('f_iters').value, 10) || 30000,
+    downscale: parseInt($('f_downscale').value, 10) || 2,
+    ckpt_interval: parseInt($('f_ckpt').value, 10),
+    preview_interval: parseInt($('f_preview').value, 10),
+    out: $('f_out').value.trim() || undefined,
+  };
+  $('f_msg').textContent = '正在启动…';
+  try {
+    const r = await post('/api/train', body);
+    $('f_msg').textContent = '已启动：' + r.cmd;
+    toast('训练已启动');
+    setTimeout(() => { $('modal').style.display = 'none'; restoreModal(); }, 900);
+    refreshDatasets();
+  } catch (e) { $('f_msg').textContent = '失败：' + e.message; }
+}
+
+function renderDatasetOptions() {
+  const sel = $('f_dataset');
+  if (!sel) return;
+  sel.innerHTML = state.datasets
+    .map(d => `<option value="${d.name}"${d.has_sfm ? '' : ' disabled'}>${d.name}${d.has_sfm ? '（' + d.registered + ' 帧）' : '（未求位姿）'}</option>`)
+    .join('');
+}
+
+$('newtrain').onclick = () => openTrain(null);
+
+// ---------------- 任务 / 指标 / 曲线 / 日志 ----------------
+function renderJobs() {
+  const box = $('jobs');
+  if (!state.jobs.length) { box.innerHTML = '<div class="empty">暂无任务</div>'; return; }
+  box.innerHTML = '';
+  for (const j of state.jobs) {
+    const el = document.createElement('div');
+    el.className = 'item';
+    el.innerHTML = `<div class="name">${j.cmd}<div class="meta">${j.started}</div></div>
+      <span class="tag ${j.alive ? 'ok' : ''}">${j.alive ? '运行中' : '结束'}</span>`;
+    box.appendChild(el);
+  }
+  state.jobs.forEach(j => loadJobLog(j.id));
+}
+
+async function loadJobLog(id) {
+  try {
+    const d = await api('/api/joblog?name=' + encodeURIComponent(id));
+    const el = $('jl_' + id);
+    if (el) el.textContent = (d.log || '').split('\n').slice(-6).join('\n');
+  } catch (e) {}
 }
 
 async function loadRunDetail(name) {
@@ -231,13 +500,10 @@ async function loadRunDetail(name) {
     renderMetrics(d.summary, state.log);
     drawCurve(state.log);
     renderLog(state.log);
-  } catch (e) {
-    $('metrics').innerHTML = '<div class="empty">读取失败：' + e.message + '</div>';
-  }
+  } catch (e) { $('metrics').innerHTML = '<div class="empty">' + e.message + '</div>'; }
 }
 
 function renderMetrics(sum, log) {
-  const box = $('metrics');
   const last = log.length ? log[log.length - 1] : null;
   let html = '';
   if (last) {
@@ -252,15 +518,12 @@ function renderMetrics(sum, log) {
     html += `<div class="kv"><span>基线 PSNR</span><span>${sum.baseline_psnr?.toFixed(2)} dB</span></div>`;
     html += `<div class="kv"><span>分辨率</span><span>${(sum.resolution || []).join('×')}</span></div>`;
     html += `<div class="kv"><span>耗时</span><span>${sum.minutes} 分钟</span></div>`;
-    html += `<div class="kv"><span>后端 K</span><span>${sum.K ?? '官方 CUDA'}</span></div>`;
   }
-  if (!html) html = '<div class="empty">这个运行还没写出指标</div>';
-  box.innerHTML = html;
+  $('metrics').innerHTML = html || '<div class="empty">还没有指标</div>';
 }
 
 function drawCurve(log) {
-  const cv = $('curve');
-  const ctx = cv.getContext('2d');
+  const cv = $('curve'), ctx = cv.getContext('2d');
   const W = cv.width, H = cv.height, pad = 34;
   ctx.clearRect(0, 0, W, H);
   if (log.length < 2) { $('curveNote').textContent = '数据点不足'; return; }
@@ -271,15 +534,11 @@ function drawCurve(log) {
   const padY = (y1 - y0) * 0.1 || 1e-6;
   const X = v => pad + (v - x0) / Math.max(x1 - x0, 1) * (W - pad - 10);
   const Y = v => H - pad - (v - (y0 - padY)) / ((y1 + padY) - (y0 - padY)) * (H - pad - 12);
-
-  ctx.strokeStyle = '#232b38'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(pad, 12); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 10, H - pad); ctx.stroke();
+  ctx.strokeStyle = '#232b38'; ctx.beginPath();
+  ctx.moveTo(pad, 12); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 10, H - pad); ctx.stroke();
   ctx.fillStyle = '#8394a8'; ctx.font = '10px Consolas';
-  ctx.fillText(y1.toFixed(3), 3, 18);
-  ctx.fillText(y0.toFixed(3), 3, H - pad);
-  ctx.fillText(String(x0), pad, H - 10);
-  ctx.fillText(String(x1), W - 46, H - 10);
-
+  ctx.fillText(y1.toFixed(3), 3, 18); ctx.fillText(y0.toFixed(3), 3, H - pad);
+  ctx.fillText(String(x0), pad, H - 10); ctx.fillText(String(x1), W - 46, H - 10);
   ctx.strokeStyle = '#7fb2ff'; ctx.lineWidth = 1.6; ctx.beginPath();
   log.forEach((d, i) => {
     if (typeof d.loss !== 'number') return;
@@ -287,11 +546,6 @@ function drawCurve(log) {
     i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
   });
   ctx.stroke();
-  ctx.fillStyle = '#7fb2ff';
-  const lastD = log[log.length - 1];
-  if (typeof lastD.loss === 'number') {
-    ctx.beginPath(); ctx.arc(X(lastD.iter), Y(lastD.loss), 3, 0, 6.284); ctx.fill();
-  }
   $('curveNote').textContent = `${log.length} 个记录点 · loss ${y0.toFixed(4)} ~ ${y1.toFixed(4)}`;
 }
 
@@ -306,132 +560,25 @@ function renderLog(log) {
 let timer = null;
 function setupAuto() {
   if (timer) clearInterval(timer);
-  if (state.auto) {
-    timer = setInterval(async () => {
-      await refreshRuns();
-      if (state.selRun) {
-        const prev = state.log.length;
-        await loadRunDetail(state.selRun);
-        if (state.log.length !== prev) renderCks();
-      }
-    }, 4000);
-  }
+  if (!state.auto) return;
+  timer = setInterval(async () => {
+    const runs = await api('/api/runs').catch(() => null);
+    if (runs) { state.runs = runs.runs; renderRuns(); renderCks(); }
+    await refreshDatasets();
+    await refreshVideos();
+    if (state.selRun) await loadRunDetail(state.selRun);
+    if (state.tab === 'live') await refreshLive();
+  }, 4000);
 }
 
-$('refresh').onclick = async () => { await refreshRuns(); if (state.selRun) loadRunDetail(state.selRun); };
+$('refresh').onclick = refreshAll;
 $('autobtn').onclick = () => {
   state.auto = !state.auto;
   $('autobtn').textContent = '自动刷新：' + (state.auto ? '开' : '关');
-  $('autobtn').classList.toggle('on', state.auto);
   setupAuto();
 };
 
-// ---------------------------------------------------------------------------
-// 数据集与新建训练
-// ---------------------------------------------------------------------------
-async function refreshDatasets() {
-  try {
-    const d = await api('/api/datasets');
-    state.datasets = d.datasets || [];
-    state.jobs = d.jobs || [];
-    renderDatasets();
-    renderJobs();
-    renderDatasetOptions();
-  } catch (e) {
-    $('datasets').innerHTML = '<div class="empty">读取失败：' + e.message + '</div>';
-  }
-}
-
-function renderDatasets() {
-  const box = $('datasets');
-  if (!state.datasets.length) { box.innerHTML = '<div class="empty">data/ 下没有数据集</div>'; return; }
-  box.innerHTML = '';
-  for (const d of state.datasets) {
-    const el = document.createElement('div');
-    el.className = 'ds';
-    const tag = d.has_sfm
-      ? `<span class="tag ok">已求位姿 ${d.registered}${d.registered >= 0 ? ' 帧' : ''}</span>`
-      : `<span class="tag no">未求位姿</span>`;
-    el.innerHTML = `<div class="t"><span>${d.name}</span>${tag}</div>
-      <div class="meta">${d.images} 张图像 · ${d.kind}</div>`;
-    el.title = d.has_sfm ? '点「新建训练」即可用这个数据集' : '需要先跑 SfM（可用命令行 python tools/run_sfm.py）';
-    box.appendChild(el);
-  }
-}
-
-function renderDatasetOptions() {
-  const sel = $('f_dataset');
-  const want = sel.value;
-  sel.innerHTML = state.datasets
-    .map(d => `<option value="${d.name}"${d.has_sfm ? '' : ' disabled'}>
-        ${d.name}${d.has_sfm ? '（' + d.registered + ' 帧）' : '（未求位姿，不可训练）'}</option>`)
-    .join('');
-  if (want) sel.value = want;
-}
-
-function renderJobs() {
-  const box = $('jobs');
-  if (!state.jobs.length) { box.innerHTML = '<div class="empty">暂无任务</div>'; return; }
-  box.innerHTML = '';
-  for (const j of state.jobs) {
-    const el = document.createElement('div');
-    el.className = 'job';
-    el.innerHTML = `<div class="t"><span>${j.cmd}</span>
-      <span class="${j.alive ? 'tag ok' : 'tag'}">${j.alive ? '运行中' : '已结束'}</span></div>
-      <div class="l" id="jl_${j.id}">加载日志…</div>`;
-    box.appendChild(el);
-  }
-  for (const j of state.jobs) loadJobLog(j.id);
-}
-
-async function loadJobLog(id) {
-  try {
-    const d = await api('/api/joblog?name=' + encodeURIComponent(id));
-    const el = $('jl_' + id);
-    if (el) { el.textContent = (d.log || '（暂无输出）').split('\n').slice(-8).join('\n');
-              el.scrollTop = el.scrollHeight; }
-  } catch (e) { /* 忽略 */ }
-}
-
-$('newtrain').onclick = () => {
-  if (!state.datasets.length) return alert('data/ 下没有数据集');
-  $('modal').style.display = 'flex';
-  $('f_msg').textContent = '';
-};
-$('f_cancel').onclick = () => $('modal').style.display = 'none';
-$('modal').onclick = e => { if (e.target === $('modal')) $('modal').style.display = 'none'; };
-
-$('f_start').onclick = async () => {
-  const body = {
-    dataset: $('f_dataset').value,
-    backend: $('f_backend').value,
-    iters: parseInt($('f_iters').value, 10) || 30000,
-    downscale: parseInt($('f_downscale').value, 10) || 2,
-    out: $('f_out').value.trim() || undefined,
-  };
-  $('f_msg').textContent = '正在启动…';
-  try {
-    const r = await fetch('/api/train', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const d = await r.json();
-    if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
-    $('f_msg').textContent = '已启动：' + d.cmd;
-    setTimeout(() => { $('modal').style.display = 'none'; }, 900);
-    await refreshDatasets();
-  } catch (e) {
-    $('f_msg').textContent = '启动失败：' + e.message;
-  }
-};
-
-(async () => {
-  await refreshRuns();
-  await refreshDatasets();
-  if (state.runs.length && !state.selRun) selectRun(state.runs[0].name);
-  setupAuto();
-  setInterval(refreshDatasets, 8000);
-})();
+(async () => { await refreshAll(); setupAuto(); })();
 </script>
 </body>
 </html>
