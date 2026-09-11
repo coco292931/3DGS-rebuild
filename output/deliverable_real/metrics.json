@@ -4,11 +4,17 @@
   "images_registered": "202/210",
   "points3D": 30741,
   "up_alignment": "rotated 125.7 deg to make +z up",
-  "iters": 6000,
-  "test_psnr": 26.82,
-  "test_ssim": 0.9044,
+  "iters": 30000,
+  "opacity_reset_interval": 3000,
+  "densify_until": 15000,
+  "gaussians": 60102,
+  "test_psnr": 27.66,
+  "test_ssim": 0.8996,
   "baseline_psnr": 15.94,
-  "per_view_psnr": "23.76 / 32.29 / 15.48",
-  "compare_with_torch_backend": "22.51 dB@1500 steps (then diverged) -> 26.82 dB@6000 steps",
-  "speed": "89 iter/s vs 5 iter/s for pure pytorch"
+  "per_view_psnr": "24.92 / 35.04 / 18.81",
+  "history": [
+    "torch backend, 1500 steps: 22.51 dB (then diverged)",
+    "cuda backend, 6000 steps: 26.82 dB",
+    "cuda backend, 30000 steps + opacity reset: 27.66 dB"
+  ]
 }
