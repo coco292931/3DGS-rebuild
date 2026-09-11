@@ -1,0 +1,5 @@
+{
+ "https://codeload.github.com/graphdeco-inria/gaussian-splatting/tar.gz/refs/heads/main": "OK 200 0.6s len=None",
+ "https://api.github.com/repos/graphdeco-inria/gaussian-splatting": "OK 200 1.6s len=7184",
+ "https://huggingface.co/api/models?limit=1": "FAIL 30.0s URLError(TimeoutError('timed out'))"
+}

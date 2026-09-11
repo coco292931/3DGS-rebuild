@@ -1,0 +1,33 @@
+{
+ "cuda_home_env": "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4",
+ "arch_list": "12.0",
+ "ninja_paths": [
+  "C:\\Users\\tonyp\\AppData\\Roaming\\Python\\Python310\\Scripts"
+ ],
+ "ninja_which": "C:\\Users\\tonyp\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\ninja.EXE",
+ "cuda_toolkits": [
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.2",
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.3",
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8",
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4"
+ ],
+ "nvcc": "Cuda compilation tools, release 13.4, V13.4.59",
+ "torch": "2.9.1+cu130",
+ "torch_cuda": "13.0",
+ "cuda_available": true,
+ "device": "NVIDIA GeForce RTX 5060",
+ "CUDA_HOME_resolved": "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4",
+ "compile": "OK",
+ "compile_sec": 80.3,
+ "kernel_out": [
+  1.0,
+  1.0,
+  1.0,
+  1.0,
+  1.0,
+  1.0,
+  1.0,
+  1.0
+ ],
+ "verdict": "TOOLCHAIN_WORKS"
+}
