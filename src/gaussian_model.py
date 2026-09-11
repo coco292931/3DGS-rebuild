@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -410,9 +411,13 @@ class GaussianModel:
         header = ["ply", "format binary_little_endian 1.0", f"element vertex {n}"]
         header += [f"property float {name}" for name, _ in fields]
         header += ["end_header"]
-        with open(path, "wb") as fh:
+        # 原子写：先落临时文件再 rename。模型有十几 MB，直接写目标文件的话，
+        # 正在轮询 checkpoint 目录的看板会读到半成品，PLY 解析当场失败。
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "wb") as fh:
             fh.write(("\n".join(header) + "\n").encode("ascii"))
             fh.write(data.tobytes())
+        os.replace(tmp, path)
 
     @classmethod
     def load_ply(cls, path: str | Path, sh_degree: int = 3, device: str | torch.device = "cuda") -> "GaussianModel":

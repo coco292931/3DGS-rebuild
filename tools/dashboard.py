@@ -211,7 +211,10 @@ def start_job(kind: str, args: dict) -> dict:
             "--out", f"output/{out_name}",
             "--init-scale-factor", str(args.get("init_scale", 1.0)),
             "--max-gaussians", str(args.get("max_gaussians", 60000)),
-            "--densify-until", str(int(iters * 0.5)),
+            # 官方是「前一半步数增密」。但步数填得很小时（比如 200 步试跑），
+            # 一半只有 100 步，高斯还没长开就停了增密。给个下限，
+            # 同时不超过总步数的 80%，免得最后完全没有收敛期。
+            "--densify-until", str(max(500, min(int(iters * 0.5), int(iters * 0.8)))),
             "--opacity-reset-interval", str(args.get("opacity_reset", 3000)),
             "--ckpt-interval", str(ckpt),
             "--preview-interval", str(preview),

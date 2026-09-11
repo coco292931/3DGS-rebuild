@@ -64,6 +64,8 @@ def render_official(
     zfar: float = 100.0,
     scale_modifier: float = 1.0,
     means2d: torch.Tensor | None = None,
+    scene_radius: float = 0.0,
+    fade_scale: float = 0.0,
 ):
     """与 render_gaussians 同签名，返回 (RenderOutput, means2d, radii)。
 
@@ -104,6 +106,17 @@ def render_official(
         debug=False,
     )
     rast = GaussianRasterizer(raster_settings=settings)
+
+    # 相机附近的球形淡出。官方核是 alpha = opacities * exp(power)，直接吃概率值，
+    # 所以在这里把淡出因子乘进去即可（和查看器同一套参数）。
+    opa = torch.sigmoid(opacities)
+    if fade_scale > 0:
+        from .rasterizer import near_fade_scale
+        sc = near_fade_scale(means, cam, scene_radius, fade_scale)
+        if sc is not None:
+            opa = opa * sc.unsqueeze(-1)
+    opa = opa.contiguous()
+
     if means2d is None:
         means2d = torch.zeros_like(means)
     img, radii = rast(
@@ -116,7 +129,7 @@ def render_official(
         # 本实现内部约定传 logit，所以这里必须自己激活一次：
         # 否则初始 opacity=0.1 对应 logit=-2.197，算出的 alpha 为负，
         # 会被 "alpha < 1/255 就跳过" 整条剔除，梯度恒为 0、训练完全冻住。
-        opacities=torch.sigmoid(opacities).contiguous(),
+        opacities=opa,
         scales=scales.contiguous(),
         rotations=quats.contiguous(),
         cov3D_precomp=None,

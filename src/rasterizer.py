@@ -199,6 +199,31 @@ def _build_fragments(proj: ProjectedGaussians, cam: Camera, device):
     return gids, frag_y * W + frag_x
 
 
+def near_fade_scale(means: torch.Tensor, cam: Camera, scene_radius: float,
+                    fade_scale: float = 0.22) -> torch.Tensor | None:
+    """相机附近的球形淡出因子，逐高斯。
+
+    与 WebGL 查看器用同一套参数（viewer.html 里 fadeEnd = sceneRadius * 0.22、
+    start = fadeEnd * 0.15），这样训练预览图和实际浏览时看到的一致。
+
+    作用：相机贴近物体时，糊在镜头前的那批高斯会整片挡住画面。它们对成像没有
+    贡献（本来就该被视角覆盖掉），但因为高度交叠会吃掉 K 个名额、把真正该显示的
+    远处内容挤掉。按距离平滑压掉它们的透明度，既治糊屏也腾出 K。
+
+    注意用 smoothstep 而非硬阈值：硬裁剪会让高斯越过阈值那一帧突然闪一下。
+    """
+    if fade_scale <= 0:
+        return None
+    # 相机的 R/T 是 float64，不显式对齐 dtype 的话这个因子会把整条链路带成 double，
+    # 官方 CUDA 核只吃 float32，会直接报 "expected scalar type Float but found Double"。
+    c = cam.camera_center.to(device=means.device, dtype=means.dtype)
+    d = torch.linalg.norm(means - c, dim=-1)
+    end = max(scene_radius * fade_scale, 1e-6)
+    start = end * 0.15
+    t = ((d - start) / max(end - start, 1e-9)).clamp(0.0, 1.0)
+    return (t * t * (3.0 - 2.0 * t)).to(means.dtype)      # smoothstep
+
+
 def rasterize(
     proj: ProjectedGaussians,
     colors: torch.Tensor,
@@ -206,8 +231,13 @@ def rasterize(
     cam: Camera,
     background: torch.Tensor,
     K: int = DEFAULT_K,
+    opacity_scale: torch.Tensor | None = None,
 ) -> RenderOutput:
-    """前向 alpha 合成。proj 由 project_gaussians 得到。"""
+    """前向 alpha 合成。proj 由 project_gaussians 得到。
+
+    opacity_scale 是逐高斯的透明度缩放（已激活空间，见 near_fade_scale），
+    用于相机附近淡出；None 表示不缩放。
+    """
     device, dtype = colors.device, colors.dtype
     W, H = cam.width, cam.height
     num_pixels = W * H
@@ -258,7 +288,10 @@ def rasterize(
 
     conic = proj.conic[gidx]
     power = -0.5 * (conic[..., 0] * dx * dx + conic[..., 2] * dy * dy) - conic[..., 1] * dx * dy
-    alpha = torch.sigmoid(opacities[gidx][..., 0]) * torch.exp(torch.clamp(power, max=0.0))
+    opa = torch.sigmoid(opacities[gidx][..., 0])
+    if opacity_scale is not None:
+        opa = opa * opacity_scale[gidx]
+    alpha = opa * torch.exp(torch.clamp(power, max=0.0))
     alpha = alpha * valid_slot.to(dtype)
 
     one_minus = 1.0 - alpha
@@ -287,12 +320,18 @@ def render_gaussians(
     background: torch.Tensor,
     sh_degree: int = 3,
     K: int = DEFAULT_K,
+    scene_radius: float = 0.0,
+    fade_scale: float = 0.0,
 ) -> RenderOutput:
-    """完整前向：球谐求色 -> 投影 -> 光栅化。"""
+    """完整前向：球谐求色 -> 投影 -> 光栅化。
+
+    scene_radius + fade_scale 给定时启用相机附近的球形淡出（与查看器同参数）。
+    """
     colors = compute_colors(means, shs, cam, sh_degree)
     cov3d = build_cov3d(quats, scales)
     proj = project_gaussians(means, cov3d, cam)
-    return rasterize(proj, colors, opacities, cam, background, K=K)
+    scale = near_fade_scale(means, cam, scene_radius, fade_scale) if fade_scale > 0 else None
+    return rasterize(proj, colors, opacities, cam, background, K=K, opacity_scale=scale)
 
 
 # --------------------------------------------------------------------------

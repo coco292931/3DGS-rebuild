@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -19,7 +20,12 @@ from .colmap_dataset import ColmapDataset
 from .dataset import SyntheticDataset
 from .gaussian_model import GaussianModel
 from .metrics import d_ssim_loss, psnr, ssim
-from .rasterizer import build_cov3d, compute_colors, project_gaussians, rasterize
+from .rasterizer import (build_cov3d, compute_colors, near_fade_scale, project_gaussians,
+                         rasterize)
+
+# 预览图的近处淡出强度，与 viewer.html 的 FADE_SCALE 默认值保持一致。
+# 两边必须用同一个数和同一个基准半径，否则预览图和实际浏览看到的东西对不上。
+PREVIEW_FADE_SCALE = 0.22
 from .rasterizer_cuda import official_available
 
 
@@ -31,7 +37,8 @@ def _render_official(*args, **kwargs):
 SSIM_LAMBDA = 0.2
 
 
-def render_view(model: GaussianModel, cam, background, K: int, backend: str = "torch"):
+def render_view(model: GaussianModel, cam, background, K: int, backend: str = "torch",
+                scene_radius: float = 0.0, fade_scale: float = 0.0):
     """渲染一个视角。
 
     两个后端返回的梯度来源不同，密度控制的阈值不能混用：
@@ -49,6 +56,7 @@ def render_view(model: GaussianModel, cam, background, K: int, backend: str = "t
             model.get_xyz, model.get_rotation, model.get_scaling,
             model._opacity, model.get_features, cam, background,
             sh_degree=model.active_sh_degree, means2d=means2d,
+            scene_radius=scene_radius, fade_scale=fade_scale,
         )
         return out, means2d, radii
 
@@ -57,7 +65,8 @@ def render_view(model: GaussianModel, cam, background, K: int, backend: str = "t
     proj = project_gaussians(model.get_xyz, cov3d, cam)
     if proj.cam_xy.requires_grad:
         proj.cam_xy.retain_grad()
-    out = rasterize(proj, colors, model._opacity, cam, background, K=K)
+    scale = near_fade_scale(model.get_xyz, cam, scene_radius, fade_scale) if fade_scale > 0 else None
+    out = rasterize(proj, colors, model._opacity, cam, background, K=K, opacity_scale=scale)
     return out, proj, proj.radius
 
 
@@ -75,19 +84,40 @@ def evaluate(model: GaussianModel, ds, K: int, indices=None, backend: str = "tor
     return float(np.mean(psnrs)), float(np.mean(ssims))
 
 
+def _write_json_atomic(path: Path, obj) -> None:
+    """原子写 JSON。看板会轮询读它，半截文件会直接解析失败。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_preview(model, ds, path: Path, K: int, index: int | None = None,
-                 train_view: bool = False, backend: str = "torch"):
-    """保存 GT / 渲染 的对比图，便于人眼检查。"""
+                 train_view: bool = False, backend: str = "torch",
+                 scene_radius: float = 0.0, fade_scale: float = 0.0):
+    """保存 GT / 渲染 的对比图，便于人眼检查。
+
+    scene_radius + fade_scale 非零时，渲染侧启用相机附近的球形淡出——
+    和 WebGL 查看器同一套参数，否则预览图会糊着一层镜头前的高斯，
+    和实际浏览时看到的完全不是一个东西。
+    """
     if index is None:
         index = ds.train_indices[0] if train_view else ds.test_indices[0]
     with torch.no_grad():
         cam = ds.camera(index)
-        out, _, _ = render_view(model, cam, ds.background, K, backend)
+        out, _, _ = render_view(model, cam, ds.background, K, backend,
+                                scene_radius=scene_radius, fade_scale=fade_scale)
         img = out.image.clamp(0.0, 1.0)
     gt = ds.image(index)
     strip = torch.cat([gt, img], dim=2).permute(1, 2, 0).cpu().numpy()
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray((strip * 255.0 + 0.5).astype(np.uint8)).save(path)
+    # 原子写：看板在轮询这个目录，写到一半的 PNG 会被读到
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    # PIL 靠扩展名猜格式，.tmp 会直接报 unknown file extension，必须显式给 format
+    Image.fromarray((strip * 255.0 + 0.5).astype(np.uint8)).save(tmp, format="PNG")
+    os.replace(tmp, path)
 
 
 def train(args) -> dict:
@@ -121,6 +151,17 @@ def train(args) -> dict:
 
     baseline = ds.mean_image_psnr()
     print(f"瞎猜基线 PSNR（训练集平均图）：{baseline:.2f} dB")
+
+    # 预览用遮罩的基准半径：取点云到中位中心距离的 p85。
+    # 刻意不用上面的 radius（那是「相机分布半径」，getNerfppNorm 的定义），
+    # 因为 viewer.html 里的 sceneRadius 就是这么算的——两边基准不同的话，
+    # 预览图里的淡出范围和实际浏览时看到的会差好几倍。
+    _pc = ds.points.detach().float().cpu().numpy().astype(np.float64)   # 可能是 CUDA 张量
+    _med = np.median(_pc, axis=0)
+    preview_radius = float(np.percentile(np.linalg.norm(_pc - _med, axis=1), 85))
+    print(f"预览遮罩基准半径（点云 p85）{preview_radius:.3f}，"
+          f"淡出范围 {preview_radius * PREVIEW_FADE_SCALE * 0.15:.3f} ~ "
+          f"{preview_radius * PREVIEW_FADE_SCALE:.3f}")
 
     rng = np.random.default_rng(args.seed)
     log_path = out_dir / "train_log.jsonl"
@@ -222,7 +263,8 @@ def train(args) -> dict:
         pi = args.preview_interval or args.eval_interval
         if pi and it % pi == 0:
             save_preview(model, ds, out_dir / "preview" / f"iter_{it:05d}.png", args.K,
-                         train_view=True, backend=args.backend)
+                         train_view=True, backend=args.backend,
+                         scene_radius=preview_radius, fade_scale=PREVIEW_FADE_SCALE)
 
         if it % args.eval_interval == 0 or it == args.iters:
             p, s = evaluate(model, ds, args.K, backend=args.backend)
@@ -247,7 +289,7 @@ def train(args) -> dict:
         "K": args.K,
         "sh_degree": args.sh_degree,
     }
-    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_json_atomic(out_dir / "summary.json", summary)
     print("\n完成：", json.dumps(summary, indent=2, ensure_ascii=False))
     return summary
 
