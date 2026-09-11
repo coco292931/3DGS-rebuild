@@ -410,7 +410,7 @@ def import_video_worker(name: str, src: Path, fps: float, scale: int, log_path: 
 def start_import(args: dict) -> dict:
     """导入是长任务（几百帧要跑几分钟），必须放到后台，
     否则前端只能干等，中途刷新还会看到 sparse/ 写了一半的中间状态。"""
-    import threading
+    import subprocess          # 上一版这里残留的是 import threading，换成 Popen 后忘了改
 
     src = Path(args["path"])
     if not src.exists():
