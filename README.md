@@ -483,6 +483,37 @@ python tools/dashboard.py                 # 默认端口 8770，扫描 output/
 
 「活跃」的判定：该运行下任意文件 90 秒内被写过。
 
+### 从看板启动训练
+
+顶部「＋ 新建训练」按钮打开表单，选数据集 / 后端 / 步数 / 下采样 / 输出名，
+点开始即在后台起一个子进程（`subprocess.Popen`，输出重定向到 `output/_jobs/<id>.log`）。
+
+**看板会跟踪这个任务**：左侧「任务」栏显示运行中/已结束状态与日志尾部，训练完成后
+新运行会自动出现在「训练运行」列表里，点开就能预览。
+
+**「数据集」栏**扫描 `data/` 下的目录，标注图像数与是否已经做完 SfM（未求位姿的会禁用，
+并提示先用 `tools/run_sfm.py` 跑一遍）。
+
+对应接口：`GET /api/datasets`、`POST /api/train`、`POST /api/sfm`、`POST /api/kill`、
+`GET /api/joblog?name=`。
+
+### 切换 checkpoint 保持相机
+
+点不同 checkpoint 时**相机角度与距离不变**——对比两代训练结果必须在同一视角下才有意义。
+实现上不是重设 `iframe.src`（那会整页重载、相机归零），而是调用查看器暴露的
+`window.loadModelKeepCamera(url)`。
+
+### 查看器右键菜单
+
+| 项 | 说明 |
+|---|---|
+| 重置视角 | 同 R |
+| 切换背景色 | 同 B |
+| 截图 | 保存当前画面为 PNG |
+| 复制当前视角链接 | 把 yaw/pitch/dist/target/bg 编码进 URL，别人打开即是同一视角 |
+| 复制相机参数 | 复制一份 JSON，便于脚本复用 |
+
+
 ## 十二、查看器交互
 
 | 操作 | 效果 |

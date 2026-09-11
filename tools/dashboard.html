@@ -47,6 +47,26 @@
   #curve{width:100%;height:150px;display:block;background:#0b0f16;border-radius:5px}
   .empty{color:var(--dim);padding:20px;text-align:center;font-size:12px}
   #note{color:var(--dim);font-size:11px}
+  #modal{position:fixed;inset:0;background:rgba(6,9,14,.72);display:none;
+    align-items:center;justify-content:center;z-index:100}
+  #modalbox{width:420px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:20px 22px}
+  #modalbox h3{margin:0 0 16px;font-size:15px}
+  #modalbox label{display:block;margin-bottom:12px;color:var(--dim);font-size:12px}
+  #modalbox select,#modalbox input{width:100%;margin-top:5px;padding:7px 9px;
+    background:#0e141c;color:var(--text);border:1px solid var(--line);border-radius:5px;font:inherit}
+  #modalbox .row{display:flex;gap:10px;margin-top:18px}
+  button.primary{background:#1f4f8f;border-color:#3d7fd6;color:#fff}
+  .ds{padding:6px 8px;border-radius:5px;cursor:pointer;margin-bottom:3px}
+  .ds:hover{background:#1a2230}
+  .ds .t{display:flex;justify-content:space-between}
+  .tag{font-size:10px;padding:1px 6px;border-radius:8px;background:#1d2a3d;color:#8fb4e0}
+  .tag.ok{background:#16321f;color:#5fd08a}
+  .tag.no{background:#33201f;color:#e08a8a}
+  .job{padding:6px 8px;border-radius:5px;margin-bottom:4px;background:#0e141c;font-size:12px}
+  .job .t{display:flex;justify-content:space-between;gap:8px}
+  .job .l{color:var(--dim);font:10px/1.4 Consolas,monospace;max-height:72px;
+    overflow:auto;white-space:pre-wrap;margin-top:4px}
 </style>
 </head>
 <body>
@@ -54,8 +74,32 @@
   <h1>3DGS 训练看板</h1>
   <span id="note">—</span>
   <div class="sp"></div>
+  <button id="newtrain">＋ 新建训练</button>
   <button id="autobtn" class="on">自动刷新：开</button>
   <button id="refresh">立即刷新</button>
+</div>
+
+<div id="modal">
+  <div id="modalbox">
+    <h3>新建训练</h3>
+    <label>数据集 <select id="f_dataset"></select></label>
+    <label>后端 <select id="f_backend">
+      <option value="cuda">cuda（官方加速后端，快，质量高）</option>
+      <option value="torch">torch（纯 PyTorch 自写实现）</option>
+    </select></label>
+    <label>训练步数 <input id="f_iters" type="number" value="30000"></label>
+    <label>下采样 <select id="f_downscale">
+      <option value="2">2（640×360，推荐）</option>
+      <option value="1">1（原始分辨率，慢 4 倍）</option>
+      <option value="3">3（更快，细节少）</option>
+    </select></label>
+    <label>输出名 <input id="f_out" type="text" placeholder="留空自动命名"></label>
+    <div class="row">
+      <button id="f_start" class="primary">开始训练</button>
+      <button id="f_cancel">取消</button>
+    </div>
+    <div id="f_msg" class="meta"></div>
+  </div>
 </div>
 
 <div id="main">
@@ -67,6 +111,14 @@
     <div class="sec">
       <h2>Checkpoints</h2>
       <div id="cks"><div class="empty">先选一个运行</div></div>
+    </div>
+    <div class="sec">
+      <h2>数据集</h2>
+      <div id="datasets"><div class="empty">扫描中…</div></div>
+    </div>
+    <div class="sec">
+      <h2>任务</h2>
+      <div id="jobs"><div class="empty">暂无任务</div></div>
     </div>
   </div>
 
@@ -94,7 +146,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let state = { runs: [], selRun: null, selCkpt: null, auto: true, log: [] };
+let state = { runs: [], datasets: [], jobs: [], selRun: null, selCkpt: null, auto: true, log: [] };
 
 async function api(path) {
   const r = await fetch(path + (path.includes('?') ? '&' : '?') + 't=' + Date.now());
@@ -161,8 +213,15 @@ function selectCkpt(file) {
     : `/model/${state.selRun}/ckpt/${file}`;
   $('viewerHint').style.display = 'none';
   const v = $('viewer');
-  v.style.display = 'block';
-  v.src = '/viewer.html?model=' + encodeURIComponent(path);
+  // 首次加载才设 src；之后直接调查看器里的接口换模型，
+  // 这样**相机角度和距离保持不变**——对比不同 checkpoint 必须同一视角才有意义。
+  if (v.style.display === 'none' || !v.contentWindow ||
+      typeof v.contentWindow.loadModelKeepCamera !== 'function') {
+    v.style.display = 'block';
+    v.src = '/viewer.html?model=' + encodeURIComponent(path);
+  } else {
+    v.contentWindow.loadModelKeepCamera(path);
+  }
 }
 
 async function loadRunDetail(name) {
@@ -267,10 +326,111 @@ $('autobtn').onclick = () => {
   setupAuto();
 };
 
+// ---------------------------------------------------------------------------
+// 数据集与新建训练
+// ---------------------------------------------------------------------------
+async function refreshDatasets() {
+  try {
+    const d = await api('/api/datasets');
+    state.datasets = d.datasets || [];
+    state.jobs = d.jobs || [];
+    renderDatasets();
+    renderJobs();
+    renderDatasetOptions();
+  } catch (e) {
+    $('datasets').innerHTML = '<div class="empty">读取失败：' + e.message + '</div>';
+  }
+}
+
+function renderDatasets() {
+  const box = $('datasets');
+  if (!state.datasets.length) { box.innerHTML = '<div class="empty">data/ 下没有数据集</div>'; return; }
+  box.innerHTML = '';
+  for (const d of state.datasets) {
+    const el = document.createElement('div');
+    el.className = 'ds';
+    const tag = d.has_sfm
+      ? `<span class="tag ok">已求位姿 ${d.registered}${d.registered >= 0 ? ' 帧' : ''}</span>`
+      : `<span class="tag no">未求位姿</span>`;
+    el.innerHTML = `<div class="t"><span>${d.name}</span>${tag}</div>
+      <div class="meta">${d.images} 张图像 · ${d.kind}</div>`;
+    el.title = d.has_sfm ? '点「新建训练」即可用这个数据集' : '需要先跑 SfM（可用命令行 python tools/run_sfm.py）';
+    box.appendChild(el);
+  }
+}
+
+function renderDatasetOptions() {
+  const sel = $('f_dataset');
+  const want = sel.value;
+  sel.innerHTML = state.datasets
+    .map(d => `<option value="${d.name}"${d.has_sfm ? '' : ' disabled'}>
+        ${d.name}${d.has_sfm ? '（' + d.registered + ' 帧）' : '（未求位姿，不可训练）'}</option>`)
+    .join('');
+  if (want) sel.value = want;
+}
+
+function renderJobs() {
+  const box = $('jobs');
+  if (!state.jobs.length) { box.innerHTML = '<div class="empty">暂无任务</div>'; return; }
+  box.innerHTML = '';
+  for (const j of state.jobs) {
+    const el = document.createElement('div');
+    el.className = 'job';
+    el.innerHTML = `<div class="t"><span>${j.cmd}</span>
+      <span class="${j.alive ? 'tag ok' : 'tag'}">${j.alive ? '运行中' : '已结束'}</span></div>
+      <div class="l" id="jl_${j.id}">加载日志…</div>`;
+    box.appendChild(el);
+  }
+  for (const j of state.jobs) loadJobLog(j.id);
+}
+
+async function loadJobLog(id) {
+  try {
+    const d = await api('/api/joblog?name=' + encodeURIComponent(id));
+    const el = $('jl_' + id);
+    if (el) { el.textContent = (d.log || '（暂无输出）').split('\n').slice(-8).join('\n');
+              el.scrollTop = el.scrollHeight; }
+  } catch (e) { /* 忽略 */ }
+}
+
+$('newtrain').onclick = () => {
+  if (!state.datasets.length) return alert('data/ 下没有数据集');
+  $('modal').style.display = 'flex';
+  $('f_msg').textContent = '';
+};
+$('f_cancel').onclick = () => $('modal').style.display = 'none';
+$('modal').onclick = e => { if (e.target === $('modal')) $('modal').style.display = 'none'; };
+
+$('f_start').onclick = async () => {
+  const body = {
+    dataset: $('f_dataset').value,
+    backend: $('f_backend').value,
+    iters: parseInt($('f_iters').value, 10) || 30000,
+    downscale: parseInt($('f_downscale').value, 10) || 2,
+    out: $('f_out').value.trim() || undefined,
+  };
+  $('f_msg').textContent = '正在启动…';
+  try {
+    const r = await fetch('/api/train', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+    $('f_msg').textContent = '已启动：' + d.cmd;
+    setTimeout(() => { $('modal').style.display = 'none'; }, 900);
+    await refreshDatasets();
+  } catch (e) {
+    $('f_msg').textContent = '启动失败：' + e.message;
+  }
+};
+
 (async () => {
   await refreshRuns();
+  await refreshDatasets();
   if (state.runs.length && !state.selRun) selectRun(state.runs[0].name);
   setupAuto();
+  setInterval(refreshDatasets, 8000);
 })();
 </script>
 </body>

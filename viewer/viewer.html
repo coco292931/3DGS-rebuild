@@ -26,6 +26,17 @@
   #bar { width:260px; height:4px; margin:14px auto 0; border-radius:2px; background:rgba(120,150,190,.2); overflow:hidden; }
   #barfill { height:100%; width:0%; background:#7fb2ff; transition:width .1s; }
   #err { color:#ff9b9b; font:12px/1.6 Consolas,monospace; margin-top:10px; max-width:520px; word-break:break-all; }
+  #ctxmenu {
+    position:fixed; z-index:50; min-width:190px; padding:5px; border-radius:7px;
+    background:rgba(18,23,31,.97); border:1px solid rgba(120,150,190,.3);
+    box-shadow:0 8px 24px rgba(0,0,0,.45); display:none;
+    font:13px "Microsoft YaHei",sans-serif; color:#dfe6f0;
+  }
+  #ctxmenu div { padding:6px 12px; border-radius:4px; cursor:pointer; display:flex;
+    justify-content:space-between; gap:20px; }
+  #ctxmenu div:hover { background:#22304a; }
+  #ctxmenu .k { color:#7d8ea3; font-size:11px; font-family:Consolas,monospace; }
+  #ctxmenu hr { border:0; border-top:1px solid rgba(120,150,190,.18); margin:4px 6px; }
   #drop b { color:#7fb2ff; }
 </style>
 </head>
@@ -537,14 +548,86 @@ canvas.addEventListener('mousedown', e => {
   lastX = e.clientX; lastY = e.clientY;
 });
 window.addEventListener('mouseup', () => dragMode = null);
-canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---- 右键菜单 ----
+const ctx = document.createElement('div');
+ctx.id = 'ctxmenu';
+document.body.appendChild(ctx);
+
+function hideCtx() { ctx.style.display = 'none'; }
+
+function showCtx(x, y) {
+  if (!gpu) return;
+  ctx.innerHTML = '';
+  const add = (label, hint, fn) => {
+    const d = document.createElement('div');
+    d.innerHTML = `<span>${label}</span><span class="k">${hint}</span>`;
+    d.onclick = () => { hideCtx(); fn(); };
+    ctx.appendChild(d);
+  };
+  add('重置视角', 'R', resetView);
+  add('切换背景色', 'B', () => {
+    bgIndex = (bgIndex + 1) % BACKGROUNDS.length;
+    flash('背景：' + BACKGROUNDS[bgIndex].name);
+  });
+  add('截图', '', () => saveShot());
+  ctx.appendChild(document.createElement('hr'));
+  add('复制当前视角链接', '', () => copyViewLink());
+  add('复制相机参数', '', () => {
+    const s = JSON.stringify({ yaw: +cam.yaw.toFixed(4), pitch: +cam.pitch.toFixed(4),
+                               dist: +cam.dist.toFixed(4), target: cam.target.map(v => +v.toFixed(4)),
+                               bg: BACKGROUNDS[bgIndex].name });
+    navigator.clipboard?.writeText(s).then(() => flash('相机参数已复制'), () => flash('复制失败'));
+  });
+  ctx.style.display = 'block';
+  const w = ctx.offsetWidth, h = ctx.offsetHeight;
+  ctx.style.left = Math.min(x, innerWidth - w - 6) + 'px';
+  ctx.style.top = Math.min(y, innerHeight - h - 6) + 'px';
+}
+
+canvas.addEventListener('contextmenu', e => { e.preventDefault(); showCtx(e.clientX, e.clientY); });
+window.addEventListener('mousedown', e => { if (e.target !== ctx && !ctx.contains(e.target)) hideCtx(); });
+window.addEventListener('wheel', hideCtx, { passive: true });
+window.addEventListener('keydown', e => { if (e.code === 'Escape') hideCtx(); });
+
+function saveShot() {
+  // 必须和绘制在同一帧内取像素，否则缓冲区已被合成清掉，只能拿到空白
+  requestAnimationFrame(() => {
+    draw();
+    try {
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'splat_' + Date.now() + '.png';
+      a.click();
+      flash('已保存截图');
+    } catch (e) {
+      flash('截图失败：' + e.message);
+    }
+  });
+}
+
+function copyViewLink() {
+  const p = new URLSearchParams(location.search);
+  p.set('yaw', cam.yaw.toFixed(4));
+  p.set('pitch', cam.pitch.toFixed(4));
+  p.set('dist', cam.dist.toFixed(4));
+  p.set('target', cam.target.map(v => v.toFixed(4)).join(','));
+  p.set('bg', String(bgIndex));
+  const url = location.origin + location.pathname + '?' + p.toString();
+  navigator.clipboard?.writeText(url).then(() => flash('链接已复制'), () => flash('复制失败'));
+}
 
 function cameraBasis() {
   const eye = cameraPosition();
   const f = [cam.target[0]-eye[0], cam.target[1]-eye[1], cam.target[2]-eye[2]];
   const fn = Math.hypot(...f) || 1; f[0]/=fn; f[1]/=fn; f[2]/=fn;
-  const r = [-f[1], f[0], 0];
-  const rn = Math.hypot(...r) || 1; r[0]/=rn; r[1]/=rn;
+  const up = [0, 0, 1];
+  // right = cross(forward, up)。写成 [-f[1], f[0], 0] 得到的是「左」方向，
+  // 会让 A/D 平移和中键平移整体反向（用 f=(0,1,0) 代入即可验出）。
+  const r = [f[1]*up[2]-f[2]*up[1], f[2]*up[0]-f[0]*up[2], f[0]*up[1]-f[1]*up[0]];
+  const rn = Math.hypot(...r) || 1; r[0]/=rn; r[1]/=rn; r[2]/=rn;
+  // down = cross(forward, right)
   const d = [f[1]*r[2]-f[2]*r[1], f[2]*r[0]-f[0]*r[2], f[0]*r[1]-f[1]*r[0]];
   return { f, r, d };
 }
@@ -673,7 +756,25 @@ async function loadFromUrl(url, name) {
   }
 }
 
-function loadBuffer(buf, name) {
+/** 供外部（看板 iframe）调用：换模型但保留当前相机。
+ *  切换 checkpoint 时要能对比同一角度下的差异，重置相机就没法比了。 */
+window.loadModelKeepCamera = async function (url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = await resp.arrayBuffer();
+    const model = parsePly(buf);
+    if (!model.count) throw new Error('文件里没有顶点数据');
+    upload(model);
+    drop.classList.add('hidden');
+    document.title = url.split('/').pop() + ' — 3DGS 查看器';
+    flash('已切换模型（相机保持不变）');
+  } catch (e) {
+    showError('切换失败：' + e.message);
+  }
+};
+
+function loadBuffer(buf, name, keepCamera = false) {
   setProgress(null, '解析中…');
   let model;
   try {
@@ -712,12 +813,18 @@ function loadBuffer(buf, name) {
   rad.sort((a, b) => a - b);
   const p85 = rad[Math.floor(rad.length * 0.85)] || 1;
   sceneRadius = p85;
-  cam.target = ctr;
-  // 2.6 太远：真实场景的点云包含大量训练视角之外的漂浮高斯，
-  // 从包围盒外看会把它们全暴露出来，主体反而糊成一团。1.2 更贴近「站在物体前」的观感。
-  cam.dist = clampDist(p85 * 1.2);
-  // 记下初始视角，R 键用它复位
-  homeView = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, target: cam.target.slice() };
+  // 首帧若 URL 指定了相机则用它，否则自动摆位
+  const urlCam = !keepCamera && applyCameraFromUrl();
+  if (!keepCamera && !urlCam) {
+    // 2.6 太远：真实场景的点云包含大量训练视角之外的漂浮高斯，
+    // 从包围盒外看会把它们全暴露出来，主体反而糊成一团。1.2 更贴近「站在物体前」的观感。
+    cam.target = ctr;
+    cam.dist = clampDist(p85 * 1.2);
+  }
+  if (!keepCamera) {
+    // 记下初始视角，R 键用它复位
+    homeView = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, target: cam.target.slice() };
+  }
   console.log('中位中心', ctr.map(v=>v.toFixed(2)), 'p85 半径', p85.toFixed(3), '-> 距离', cam.dist.toFixed(2));
   console.log('已载入', name, model.count, '个高斯');
 }
@@ -736,6 +843,27 @@ window.addEventListener('drop', e => {
 
 // 支持 ?model=xxx.ply 自动载入
 const params = new URLSearchParams(location.search);
+
+// URL 里带了相机参数就直接用它（右键菜单「复制视角链接」的配套），
+// 这样可以把某个观察角度分享出去，别人打开就是同一个视角。
+function applyCameraFromUrl() {
+  const y = parseFloat(params.get('yaw'));
+  const p = parseFloat(params.get('pitch'));
+  const d = parseFloat(params.get('dist'));
+  const t = params.get('target');
+  const b = parseInt(params.get('bg') || '', 10);
+  let applied = false;
+  if (Number.isFinite(y)) { cam.yaw = y; applied = true; }
+  if (Number.isFinite(p)) { cam.pitch = Math.max(-1.45, Math.min(1.45, p)); applied = true; }
+  if (Number.isFinite(d)) { cam.dist = clampDist(d); applied = true; }
+  if (t) {
+    const parts = t.split(',').map(Number);
+    if (parts.length === 3 && parts.every(Number.isFinite)) { cam.target = parts; applied = true; }
+  }
+  if (Number.isInteger(b) && b >= 0 && b < BACKGROUNDS.length) bgIndex = b;
+  return applied;
+}
+
 if (params.get('model')) {
   loadFromUrl(params.get('model'), params.get('model'));
 } else {
