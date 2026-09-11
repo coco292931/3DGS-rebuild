@@ -132,21 +132,25 @@ def scan_datasets() -> list[dict]:
             if p.exists():
                 imgs = sorted([*p.glob("*.png"), *p.glob("*.jpg")])
                 break
+        # 导入还在跑的时候，sparse/ 可能只写了一半，这时报出的帧数是误导性的。
+        # 用 worker 留下的标记文件把「处理中」和「已就绪」区分开。
+        importing = (d / ".importing").exists()
         has_sfm = (d / "sparse").exists()
         n_view = 0
-        if has_sfm:
+        if has_sfm and not importing:
             try:
                 import pycolmap
                 best = ColmapDataset._find_model(d)
                 n_view = pycolmap.Reconstruction(str(best)).num_reg_images()
             except Exception:
-                n_view = -1
+                n_view = 0        # 读不出来就报 0，不要报 -1 让人以为是失败
         out.append({
             "name": d.name,
             "images": len(imgs),
-            "has_sfm": has_sfm,
+            "has_sfm": has_sfm and not importing,
+            "importing": importing,
             "registered": n_view,
-            "kind": "colmap" if has_sfm else ("images" if imgs else "empty"),
+            "kind": "importing" if importing else ("colmap" if has_sfm else ("images" if imgs else "empty")),
         })
     return out
 
@@ -154,6 +158,12 @@ def scan_datasets() -> list[dict]:
 def list_jobs() -> list[dict]:
     jobs = []
     for name, j in JOBS.items():
+        if j.get("thread") is not None:          # 导入这类线程任务
+            th = j["thread"]
+            alive = th.is_alive()
+            jobs.append({"id": name, "kind": j["kind"], "cmd": j["cmd_short"],
+                         "alive": alive, "returncode": None, "started": j["started"]})
+            continue
         p = j["proc"]
         alive = p.poll() is None
         jobs.append({
@@ -303,9 +313,70 @@ def probe_video(path: str) -> dict:
         return {"error": str(e)[:120]}
 
 
-def import_video(args: dict) -> dict:
-    """抽帧 + SfM，产出一个可直接训练的数据集。"""
+def import_video_worker(name: str, src: Path, fps: float, scale: int, log_path: Path):
+    """在后台线程里跑完整导入。进度写进 log 文件，前端轮询显示。"""
     import subprocess
+
+    ds = ROOT / "data" / name
+    frames = ds / "frames"
+    marker = ds / ".importing"
+    ds.mkdir(parents=True, exist_ok=True)
+    marker.write_text("1", encoding="utf-8")
+    frames.mkdir(parents=True, exist_ok=True)
+    for old in frames.glob("*.png"):
+        old.unlink()
+
+    fh = open(log_path, "w", encoding="utf-8", buffering=1)
+
+    def say(msg):
+        fh.write(msg + "\n")
+        fh.flush()
+
+    def run(cmd, label):
+        say(f"[{time.strftime('%H:%M:%S')}] {label} …")
+        p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+        tail = ((p.stdout or "") + (p.stderr or "")).strip()[-400:]
+        if tail:
+            say("    " + tail.replace("\n", "\n    "))
+        if p.returncode != 0:
+            raise RuntimeError(f"{label} 失败（返回码 {p.returncode}）")
+
+    try:
+        say(f"开始导入 {src.name}")
+        n = len(list(frames.glob("*.png")))
+        # 抽帧。fps 必须够密——手持转半秒能转过二十几度，帧间视差过大会直接匹配失败。
+        run([FFMPEG, "-y", "-v", "error", "-i", str(src),
+             "-vf", f"fps={fps},scale={scale}:-1", "-q:v", "2",
+             str(frames / "frame_%04d.png")], "抽帧")
+        n = len(list(frames.glob("*.png")))
+        say(f"    抽出 {n} 帧")
+        if n < 12:
+            raise RuntimeError(f"只抽出 {n} 帧，太少，无法重建")
+
+        for stage, label in (("features", "特征提取"), ("match", "顺序匹配"), ("map", "增量式重建")):
+            cmd = [sys.executable, "-u", "tools/run_sfm.py", f"data/{name}", "--stage", stage]
+            if stage == "match":
+                cmd.append("--sequential")
+            run(cmd, label)
+
+        n_reg = 0
+        try:
+            import pycolmap
+            n_reg = pycolmap.Reconstruction(str(ColmapDataset._find_model(ds))).num_reg_images()
+        except Exception as e:
+            say(f"    读回模型失败：{str(e)[:120]}")
+        say(f"[{time.strftime('%H:%M:%S')}] 完成：{n} 帧抽出，{n_reg} 帧注册")
+    except Exception as e:
+        say(f"[{time.strftime('%H:%M:%S')}] 失败：{e}")
+    finally:
+        marker.unlink(missing_ok=True)
+        fh.close()
+
+
+def start_import(args: dict) -> dict:
+    """导入是长任务（几百帧要跑几分钟），必须放到后台，
+    否则前端只能干等，中途刷新还会看到 sparse/ 写了一半的中间状态。"""
+    import threading
 
     src = Path(args["path"])
     if not src.exists():
@@ -314,42 +385,18 @@ def import_video(args: dict) -> dict:
     fps = float(args.get("fps", 6))
     scale = int(args.get("scale", 1280))
 
-    ds = ROOT / "data" / name
-    frames = ds / "frames"
-    frames.mkdir(parents=True, exist_ok=True)
-    for old in frames.glob("*.png"):
-        old.unlink()
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    job_id = f"import_{time.strftime('%m%d_%H%M%S')}"
+    log_path = JOBS_DIR / f"{job_id}.log"
+    log_path.write_text("", encoding="utf-8")
 
-    def run(cmd, log):
-        p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
-        log.append("$ " + " ".join(str(c) for c in cmd))
-        tail = (p.stdout or "")[-800:] + (p.stderr or "")[-800:]
-        log.append(tail.strip()[-800:])
-        if p.returncode != 0:
-            raise RuntimeError(f"命令失败({p.returncode}): " + " ".join(str(c) for c in cmd[:3]))
-
-    log: list[str] = []
-    # 抽帧。fps 必须够密——手持转半秒能转过二十几度，帧间视差过大会直接匹配失败。
-    run([FFMPEG, "-y", "-v", "error", "-i", str(src),
-         "-vf", f"fps={fps},scale={scale}:-1", "-q:v", "2",
-         str(frames / "frame_%04d.png")], log)
-    n = len(list(frames.glob("*.png")))
-    if n < 12:
-        raise RuntimeError(f"只抽出 {n} 帧，太少，无法重建")
-
-    for stage in ("features", "match", "map"):
-        cmd = [sys.executable, "-u", "tools/run_sfm.py", f"data/{name}", "--stage", stage]
-        if stage == "match":
-            cmd.append("--sequential")
-        run(cmd, log)
-
-    n_reg = -1
-    try:
-        import pycolmap
-        n_reg = pycolmap.Reconstruction(str(ColmapDataset._find_model(ds))).num_reg_images()
-    except Exception:
-        pass
-    return {"dataset": name, "frames": n, "registered": n_reg, "log": "\n".join(log)[-1500:]}
+    t = threading.Thread(target=import_video_worker, args=(name, src, fps, scale, log_path),
+                         daemon=True)
+    t.start()
+    JOBS[job_id] = {"proc": None, "thread": t, "kind": "import", "log": str(log_path),
+                    "started": time.strftime("%H:%M:%S"),
+                    "cmd_short": f"导入 {src.name} → {name}"}
+    return {"id": job_id, "dataset": name, "cmd": f"导入 {src.name}"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -381,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
             if not body.get("path"):
                 return self._json({"error": "缺少 path"}, 400)
             try:
-                return self._json(import_video(body))
+                return self._json(start_import(body))
             except Exception as e:
                 return self._json({"error": str(e)[:300]}, 500)
 

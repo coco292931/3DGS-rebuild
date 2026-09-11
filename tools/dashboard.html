@@ -50,6 +50,9 @@
   .tag{font-size:10px;padding:1px 6px;border-radius:8px;background:#1d2a3d;color:#8fb4e0;flex:none}
   .tag.ok{background:#16321f;color:#5fd08a}
   .tag.no{background:#33201f;color:#e08a8a}
+  #jobs .l{color:var(--dim);font:10px/1.4 Consolas,monospace;max-height:58px;
+    overflow:auto;white-space:pre-wrap;margin-top:3px}
+  #jobs .item{align-items:flex-start}
   .row{display:flex;gap:6px;margin-top:5px}
   #tabs{height:32px;display:flex;gap:2px;padding:4px 6px 0;background:#0e131b;border-bottom:1px solid var(--line)}
   .tab{padding:3px 14px;border-radius:5px 5px 0 0;cursor:pointer;font-size:12px;color:var(--dim)}
@@ -225,9 +228,10 @@ function renderDatasets() {
   for (const d of state.datasets) {
     const el = document.createElement('div');
     el.className = 'item' + (state.selDataset === d.name ? ' sel' : '');
-    const tag = d.has_sfm
-      ? `<span class="tag ok">${d.registered} 帧</span>`
-      : `<span class="tag no">未求位姿</span>`;
+    const tag = d.importing
+      ? `<span class="tag">导入中…</span>`
+      : (d.has_sfm ? `<span class="tag ok">${d.registered} 帧</span>`
+                   : `<span class="tag no">未求位姿</span>`);
     el.innerHTML = `<div class="name">${d.name}<div class="meta">${d.images} 张图像</div></div>${tag}`;
     el.onclick = () => { state.selDataset = d.name; renderDatasets();
                          $('dsHint').textContent = '已选 ' + d.name; };
@@ -303,15 +307,22 @@ function showImport(v) {
     <div id="i_msg" class="meta"></div>`;
   $('i_cancel').onclick = () => { $('modal').style.display = 'none'; restoreModal(); };
   $('i_go').onclick = async () => {
-    $('i_msg').textContent = '导入中…（抽帧 + SfM，通常 1~3 分钟）';
+    $('i_go').disabled = true;
+    $('i_msg').textContent = '正在启动…';
     try {
       const r = await post('/api/import', { path: v.path, name: $('i_name').value,
                                             fps: parseFloat($('i_fps').value),
                                             scale: parseInt($('i_scale').value, 10) });
-      $('i_msg').textContent = `完成：抽出 ${r.frames} 帧，注册 ${r.registered} 帧`;
-      toast('导入完成：' + r.dataset);
+      // 导入是后台任务：立刻返回，进度去左下「任务」栏看
+      $('i_msg').innerHTML = `已开始后台导入：<b>${r.dataset}</b><br>
+        进度见左侧「任务」栏（几百帧通常要几分钟）`;
+      toast('已开始导入：' + r.dataset);
       refreshDatasets();
-    } catch (e) { $('i_msg').textContent = '失败：' + e.message; }
+      setTimeout(() => { $('modal').style.display = 'none'; restoreModal(); }, 1800);
+    } catch (e) {
+      $('i_go').disabled = false;
+      $('i_msg').textContent = '失败：' + e.message;
+    }
   };
 }
 function restoreModal() { location.reload(); }
@@ -478,7 +489,8 @@ function renderJobs() {
   for (const j of state.jobs) {
     const el = document.createElement('div');
     el.className = 'item';
-    el.innerHTML = `<div class="name">${j.cmd}<div class="meta">${j.started}</div></div>
+    el.innerHTML = `<div class="name">${j.cmd}<div class="meta">${j.started}</div>
+        <div class="l" id="jl_${j.id}">…</div></div>
       <span class="tag ${j.alive ? 'ok' : ''}">${j.alive ? '运行中' : '结束'}</span>`;
     box.appendChild(el);
   }
