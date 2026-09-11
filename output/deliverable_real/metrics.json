@@ -1,11 +1,14 @@
 {
   "scene": "real: log slice (VID_20260910_214703.mp4)",
+  "backend": "cuda (official diff-gaussian-rasterization)",
   "images_registered": "202/210",
   "points3D": 30741,
-  "up_alignment": "rotated 125.7 deg to make +z up (SfM frame was upside down)",
-  "best_ckpt": "iter_01500.ply",
-  "test_psnr": 22.51,
-  "test_ssim": 0.8489,
+  "up_alignment": "rotated 125.7 deg to make +z up",
+  "iters": 6000,
+  "test_psnr": 26.82,
+  "test_ssim": 0.9044,
   "baseline_psnr": 15.94,
-  "focal_check": "SfM 996.8px vs 26mm-equiv 882.5px @1280 -> SfM 12.9% longer, consistent with EIS crop"
+  "per_view_psnr": "23.76 / 32.29 / 15.48",
+  "compare_with_torch_backend": "22.51 dB@1500 steps (then diverged) -> 26.82 dB@6000 steps",
+  "speed": "89 iter/s vs 5 iter/s for pure pytorch"
 }

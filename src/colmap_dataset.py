@@ -185,10 +185,33 @@ class ColmapDataset:
 
     @staticmethod
     def _find_model(root: Path) -> Path:
-        for cand in [root / "sparse" / "0", root / "sparse", root]:
-            if (cand / "cameras.bin").exists() or (cand / "cameras.txt").exists():
-                return cand
-        raise FileNotFoundError(f"{root} 下找不到 COLMAP 模型（cameras.bin）")
+        """挑注册图像最多的模型。
+
+        incremental_mapping 可能输出多个模型（本场景就输出了两个：81 图和 142 图，
+        相机绕圈途中因光照突变断过一次）。写死 sparse/0 会拿到小的那个，
+        白白丢掉一半视角——实测只用 81 帧时 PSNR 只有 16.8 dB。
+        """
+        import pycolmap
+
+        sparse = root / "sparse"
+        cands = []
+        if sparse.exists():
+            cands = [d for d in sorted(sparse.iterdir())
+                     if d.is_dir() and ((d / "cameras.bin").exists() or (d / "cameras.txt").exists())]
+        if not cands:
+            cands = [d for d in (root, sparse) if (d / "cameras.bin").exists() or (d / "cameras.txt").exists()]
+        if not cands:
+            raise FileNotFoundError(f"{root} 下找不到 COLMAP 模型（cameras.bin）")
+
+        best, best_n = cands[0], -1
+        for d in cands:
+            try:
+                n = pycolmap.Reconstruction(str(d)).num_reg_images()
+            except Exception:
+                continue
+            if n > best_n:
+                best, best_n = d, n
+        return best
 
     def camera(self, index: int) -> Camera:
         return Camera(
