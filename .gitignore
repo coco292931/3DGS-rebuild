@@ -12,6 +12,10 @@ output/*/
 # 截图也已经转成 JPEG 存（PNG 在这些图上纯属浪费，压完小 88%）
 output/**/*.ply
 output/**/*.png
+# 打包产物：里面的东西都已经各自在仓库里，再压一份纯属翻倍
+*.zip
+*.7z
+*.tar.gz
 
 # ---- 官方 CUDA 扩展：源码与编译产物都不进仓库 ----
 # 用 _upstream/build_dgr.bat 自行拉取并编译即可
