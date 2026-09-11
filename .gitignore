@@ -33,6 +33,14 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
+# ---- 提交信息临时文件 ----
+# 用 git commit -F 传多行中文提交信息时落盘的中间文件。
+# 之前忘了忽略它，导致每次提交都把它一起带上，然后再补一个「移除临时文件」的
+# 无用提交——历史里攒了九条这种垃圾。
+_cmsg*.txt
+_commitmsg.txt
+*.commitmsg
+
 # ---- 编辑器 / 系统 ----
 .vscode/
 .idea/
