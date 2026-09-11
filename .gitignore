@@ -3,9 +3,15 @@ data/
 
 # ---- 训练中间产物：checkpoint / 预览 / 日志，不进仓库 ----
 output/*/
-# 但交付成品要留（PLY 模型无法由脚本重新生成，必须提交）
+# 交付目录只留给人看的东西（截图 + 查看器 + view.bat），
+# PLY 模型 14MB 一个、四个场景就 50MB+，不入库——用 tools/rebuild.sh 自己训练生成。
 !output/deliverable/
 !output/deliverable_real/
+!output/deliverable_real4/
+!output/deliverable_figurine/
+# 截图也已经转成 JPEG 存（PNG 在这些图上纯属浪费，压完小 88%）
+output/**/*.ply
+output/**/*.png
 
 # ---- 官方 CUDA 扩展：源码与编译产物都不进仓库 ----
 # 用 _upstream/build_dgr.bat 自行拉取并编译即可

@@ -1,0 +1,14 @@
+{
+  "scene": "real: log closeup (VID_20260910_230203.mp4)",
+  "backend": "cuda (official diff-gaussian-rasterization)",
+  "images_registered": "141/152",
+  "points3D": 11181,
+  "up_alignment": "rotated 109.0 deg to make +z up",
+  "iters": 30000,
+  "gaussians": 59941,
+  "test_psnr": 31.14,
+  "test_ssim": 0.9496,
+  "baseline_psnr": 14.03,
+  "per_view_psnr": "13.43 / 33.49 / 27.92",
+  "training_curve": "5000:27.45  10000:27.93  15000:29.75  20000:30.30  25000:30.99  30000:31.14"
+}

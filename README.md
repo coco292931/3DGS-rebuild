@@ -677,6 +677,38 @@ python tools/dashboard.py                 # 默认端口 8770，扫描 output/
 
 ---
 
+
+### 关于交付目录里的 PLY
+
+仓库**不包含 PLY 模型文件**（一个 14MB，四个场景 50MB+）。交付目录里只保留：
+
+| 文件 | 说明 |
+|---|---|
+| `viewer.html` | 单文件 WebGL 查看器 |
+| `view.bat` | 双击启动（自动开浏览器） |
+| `compare_gt_vs_render.jpg` | GT 与渲染的对比图 |
+| `metrics.json` | 该场景的实测指标 |
+
+**要得到可浏览的 PLY，用自己的数据跑一遍即可**：
+
+```bash
+# 1) 把视频拖进看板的「可导入的视频」列表点一下，或直接命令行：
+python tools/import_video.py --video 你的视频.mp4 --name myscene --fps 6 --scale 960
+
+# 2) 训练（cuda 后端，三十分钟内出结果）
+python -m src.train --data data/myscene --dataset colmap --backend cuda \
+    --iters 30000 --downscale 2 --out output/myscene \
+    --init-scale-factor 1.0 --densify-until 15000 --opacity-reset-interval 3000
+
+# 3) 看结果：把 output/myscene/ckpt/iter_30000.ply 拷成交付目录里的 point_cloud.ply
+#    再双击 view.bat
+```
+
+截图之所以存成 JPEG 而不是 PNG：这些对比图用 PNG 无损保存纯属浪费，
+转 JPEG（质量 86）后体积小 88%，肉眼分辨不出差别。
+
+---
+
 ## 参考
 
 - 原论文：Kerbl, Kopanas, Leimkühler, Drettakis. *3D Gaussian Splatting for Real-Time Radiance Field Rendering*. SIGGRAPH 2023.

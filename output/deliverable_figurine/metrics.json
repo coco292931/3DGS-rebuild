@@ -1,0 +1,14 @@
+{
+  "scene": "real: anime figurine (VID_20260911_192232.mp4)",
+  "backend": "cuda (official diff-gaussian-rasterization)",
+  "images_registered": "313/313 (100%)",
+  "points3D": 44224,
+  "up_alignment": "rotated 130.1 deg to make +z up",
+  "iters": 30000,
+  "gaussians": 59892,
+  "test_psnr": 24.41,
+  "test_ssim": 0.8803,
+  "baseline_psnr": 15.18,
+  "per_view_psnr": "25.15 / 19.97 / 21.38",
+  "note": "PSNR 数值低于木桩场景，但场景复杂度高得多（手办+钥匙扣+镜子+玩具+桌面杂物），面部五官与衣物纹理均重建成功"
+}
