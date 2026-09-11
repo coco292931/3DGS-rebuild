@@ -1,0 +1,8 @@
+{
+ "which_ninja": "C:\\Users\\tonyp\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\ninja.EXE",
+ "capture_output": "FAIL PermissionError: [WinError 5] 拒绝访问。",
+ "pipe": "FAIL PermissionError: [WinError 5] 拒绝访问。",
+ "inherit": "OK rc=0 out=",
+ "torch_is_ninja_available": "ERR ImportError(\"cannot import name '_is_ninja_available' from 'torch.utils.cpp_extension' (C:\\\\Users\\\\tonyp\\\\AppData\\\\Local",
+ "nvcc_capture": "FAIL PermissionError: [WinError 5] 拒绝访问。"
+}

@@ -1,0 +1,12 @@
+{
+ "https://cdn.jsdelivr.net/gh/graphdeco-inria/gaussian-splatting@main/README.md": "OK 200 len=None 1.2s head=b'# 3D Gaussian Splatting for Real-Time Radiance Field Rendering\\nBernhard Kerbl*, '",
+ "https://fastly.jsdelivr.net/gh/graphdeco-inria/gaussian-splatting@main/README.md": "OK 200 len=40778 14.5s head=b'# 3D Gaussian Splatting for Real-Time Radiance Field Rendering\\nBernhard Kerbl*, '",
+ "https://gcore.jsdelivr.net/gh/graphdeco-inria/gaussian-splatting@main/README.md": "OK 200 len=None 2.3s head=b'# 3D Gaussian Splatting for Real-Time Radiance Field Rendering\\nBernhard Kerbl*, '",
+ "https://raw.githubusercontent.com/graphdeco-inria/gaussian-splatting/main/README.md": "OK 200 len=40778 1.3s head=b'# 3D Gaussian Splatting for Real-Time Radiance Field Rendering\\nBernhard Kerbl*, '",
+ "https://gh-proxy.com/https://raw.githubusercontent.com/graphdeco-inria/gaussian-splatting/main/README.md": "OK 200 len=None 67.0s head=b'# 3D Gaussian Splatting for Real-Time Radiance Field Rendering\\nBernhard Kerbl*, '",
+ "https://ghfast.top/https://raw.githubusercontent.com/graphdeco-inria/gaussian-splatting/main/README.md": "FAIL 12.1s URLError(TimeoutError('timed out'))",
+ "https://arxiv.org/abs/2308.04079": "FAIL 0.1s URLError(ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None))",
+ "https://hf-mirror.com": "OK 200 len=14062 0.3s head=b'<!DOCTYPE html>\\n<html lang=\"zh\">\\n\\n<head>\\n\\n    <meta charset=\"UTF-8\">\\n    <meta n'",
+ "https://gitee.com": "OK 200 len=638953 0.3s head=b'<!DOCTYPE html><html lang=\"zh-CN\" class=\"\"><head><meta charSet=\"utf-8\" data-next'",
+ "https://pypi.org/simple/plyfile/": "OK 200 len=13311 0.7s head=b'<!DOCTYPE html>\\n<html lang=\"en\">\\n  <head>\\n    <meta name=\"pypi:repository-versio'"
+}

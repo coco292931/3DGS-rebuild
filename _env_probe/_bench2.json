@@ -1,0 +1,29 @@
+[
+ {
+  "tag": "small",
+  "N": 100000,
+  "frags": 3427516,
+  "proj_ms": 150.7,
+  "raster_ms": 146.1,
+  "bwd_ms": 379.6,
+  "peak_MB": 561.5
+ },
+ {
+  "tag": "tiny",
+  "N": 150000,
+  "frags": 4525138,
+  "proj_ms": 2.5,
+  "raster_ms": 20.5,
+  "bwd_ms": 242.0,
+  "peak_MB": 677.5
+ },
+ {
+  "tag": "medium-ish",
+  "N": 60000,
+  "frags": 2578559,
+  "proj_ms": 2.0,
+  "raster_ms": 12.9,
+  "bwd_ms": 352.5,
+  "peak_MB": 489.5
+ }
+]
