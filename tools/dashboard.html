@@ -240,9 +240,20 @@ function renderDatasets() {
     if (state.selDataset === d.name) {
       const row = document.createElement('div');
       row.className = 'row';
-      if (d.has_sfm) {
+      if (d.importing) {
+        // 导入本身就在做抽帧 + 求位姿。这时候再放一个「求相机位姿」按钮，
+        // 用户一点就会起第二个进程，两个 COLMAP 同时读写同一个 database.db，
+        // faiss 索引当场崩掉（实测返回码 3）。所以导入期间不给任何操作。
+        const m = document.createElement('span');
+        m.className = 'meta';
+        m.textContent = '正在导入（抽帧 + 求位姿），完成后可训练';
+        row.appendChild(m);
+      } else if (d.has_sfm) {
         const b = document.createElement('button');
         b.className = 'sm primary'; b.textContent = '用这个数据集训练';
+        // 后端也会挡（dataset_busy），前端先禁用，省得点了才报错
+        const busy = state.jobs.some(j => j.alive && j.datasets && j.datasets.includes(d.name));
+        if (busy) { b.disabled = true; b.textContent = '有任务在跑'; }
         b.onclick = e => { e.stopPropagation(); openTrain(d.name); };
         row.appendChild(b);
       } else {
@@ -251,7 +262,7 @@ function renderDatasets() {
         b.onclick = async e => {
           e.stopPropagation();
           try { const r = await post('/api/sfm', { dataset: d.name }); toast('已启动 ' + r.cmd); refreshDatasets(); }
-          catch (err) { toast('失败：' + err.message); }
+          catch (err) { toast('启动失败：' + err.message); }   // 例如「已有任务在跑」
         };
         row.appendChild(b);
       }
@@ -500,9 +511,11 @@ function renderJobs() {
   for (const j of state.jobs) {
     const el = document.createElement('div');
     el.className = 'item';
+    const bad = !j.alive && j.returncode !== null && j.returncode !== 0;
     el.innerHTML = `<div class="name">${j.cmd}<div class="meta">${j.started}</div>
         <div class="l" id="jl_${j.id}">…</div></div>
-      <span class="tag ${j.alive ? 'ok' : ''}">${j.alive ? '运行中' : '结束'}</span>`;
+      <span class="tag ${j.alive ? 'ok' : (bad ? 'no' : '')}">
+        ${j.alive ? '运行中' : (bad ? '失败 ' + j.returncode : '结束')}</span>`;
     box.appendChild(el);
   }
   state.jobs.forEach(j => loadJobLog(j.id));

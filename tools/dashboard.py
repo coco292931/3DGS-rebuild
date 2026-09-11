@@ -162,7 +162,8 @@ def list_jobs() -> list[dict]:
             th = j["thread"]
             alive = th.is_alive()
             jobs.append({"id": name, "kind": j["kind"], "cmd": j["cmd_short"],
-                         "alive": alive, "returncode": None, "started": j["started"]})
+                         "alive": alive, "returncode": None, "started": j["started"],
+                         "datasets": j.get("datasets", [])})
             continue
         p = j["proc"]
         alive = p.poll() is None
@@ -173,6 +174,7 @@ def list_jobs() -> list[dict]:
             "alive": alive,
             "returncode": None if alive else p.returncode,
             "started": j["started"],
+            "datasets": j.get("datasets", []),
         })
     return jobs
 
@@ -186,6 +188,28 @@ def read_job_log(name: str, tail: int = 400) -> str:
         return "\n".join(lines[-tail:])
     except Exception:
         return ""
+
+
+def dataset_busy(dataset: str) -> str | None:
+    """检查某个数据集上是否已经有导入/SfM 在跑。
+
+    两个进程同时读写同一个 database.db 会让 COLMAP 内部的 faiss 索引崩掉
+    （实测直接抛 InterruptCallback 堆栈、返回码 3）。所以必须互斥。
+    训练虽然只读 sparse/，但和导入并发也会读到写了一半的模型，一并挡掉。
+    """
+    # 看板重启会丢掉内存里的 JOBS，但子进程还在跑。所以额外用磁盘上的
+    # .importing 标记兜底，否则重启后又会允许对同一个数据集起第二个任务。
+    if (ROOT / "data" / dataset / ".importing").exists():
+        return f"「{dataset}」正在导入中，等它结束再操作"
+
+    for jid, j in JOBS.items():
+        if j["kind"] not in ("import", "sfm"):
+            continue
+        alive = (j["thread"].is_alive() if j.get("thread") is not None
+                 else (j["proc"] is not None and j["proc"].poll() is None))
+        if alive and dataset in j.get("datasets", []):
+            return f"「{dataset}」上已有任务在跑（{j['cmd_short']}），等它结束再操作"
+    return None
 
 
 def start_job(kind: str, args: dict) -> dict:
@@ -227,8 +251,14 @@ def start_job(kind: str, args: dict) -> dict:
         if ckpt: parts.append(f"ckpt/{ckpt}")
         if preview: parts.append(f"预览/{preview}")
         cmd_short = " · ".join(parts)
+        busy = dataset_busy(ds)
+        if busy:
+            raise RuntimeError(busy)
     elif kind == "sfm":
         ds = str(args["dataset"])
+        busy = dataset_busy(ds)
+        if busy:
+            raise RuntimeError(busy)
         cmd = [sys.executable, "-u", "tools/run_sfm.py", f"data/{ds}", "--stage", "all", "--sequential"]
         cmd_short = f"SfM {ds}"
     else:
@@ -239,7 +269,8 @@ def start_job(kind: str, args: dict) -> dict:
     proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=fh, stderr=subprocess.STDOUT,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     JOBS[name] = {"proc": proc, "kind": kind, "cmd_short": cmd_short,
-                  "started": time.strftime("%H:%M:%S"), "log": str(log_path)}
+                  "started": time.strftime("%H:%M:%S"), "log": str(log_path),
+                  "datasets": [ds]}
     return {"id": name, "cmd": cmd_short}
 
 
@@ -385,19 +416,26 @@ def start_import(args: dict) -> dict:
     if not src.exists():
         raise FileNotFoundError(f"视频不存在：{src}")
     name = re.sub(r"[^0-9A-Za-z_]+", "_", args.get("name") or src.stem)[:40] or "video"
+    busy = dataset_busy(name)
+    if busy:
+        raise RuntimeError(busy)
     fps = float(args.get("fps", 6))
     scale = int(args.get("scale", 1280))
 
+    # 用独立子进程而不是线程：线程跟着看板进程一起死，看板一重启
+    # 正在跑的导入就被砍断，留下半截 database.db（实测会让后续 SfM 直接崩）。
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     job_id = f"import_{time.strftime('%m%d_%H%M%S')}"
     log_path = JOBS_DIR / f"{job_id}.log"
-    log_path.write_text("", encoding="utf-8")
-
-    t = threading.Thread(target=import_video_worker, args=(name, src, fps, scale, log_path),
-                         daemon=True)
-    t.start()
-    JOBS[job_id] = {"proc": None, "thread": t, "kind": "import", "log": str(log_path),
+    fh = open(log_path, "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(ROOT / "tools" / "import_video.py"),
+         "--video", str(src), "--name", name, "--fps", str(fps), "--scale", str(scale)],
+        cwd=str(ROOT), stdout=fh, stderr=subprocess.STDOUT,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    JOBS[job_id] = {"proc": proc, "kind": "import", "log": str(log_path),
                     "started": time.strftime("%H:%M:%S"),
+                    "datasets": [name],
                     "cmd_short": f"导入 {src.name} → {name}"}
     return {"id": job_id, "dataset": name, "cmd": f"导入 {src.name}"}
 
