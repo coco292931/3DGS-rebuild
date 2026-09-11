@@ -217,7 +217,9 @@ async function refreshDatasets() {
     const d = await api('/api/datasets');
     state.datasets = d.datasets || [];
     state.jobs = d.jobs || [];
-    renderDatasets(); renderJobs(); renderDatasetOptions();
+    renderDatasets(); renderJobs();
+    // 只有弹窗开着时才需要同步下拉框；否则别去碰它
+    if ($('modal').style.display === 'flex' && $('f_dataset')) renderDatasetOptions();
   } catch (e) { $('datasets').innerHTML = '<div class="empty">' + e.message + '</div>'; }
 }
 
@@ -412,8 +414,8 @@ async function refreshLive() {
 
 // ---------------- 训练启动 ----------------
 function openTrain(ds) {
-  const sel = $('f_dataset');
-  if (ds) { sel.value = ds; }
+  // 注意：modalbox 是整块重建的，重建之前拿到的 select 是旧元素，
+  // 在那上面设 value 没有意义——必须等 innerHTML 换完、options 填好之后再设。
   $('modalbox').innerHTML = `<h3>新建训练</h3>
     <label>数据集 <select id="f_dataset"></select></label>
     <label>后端 <select id="f_backend">
@@ -445,7 +447,7 @@ function openTrain(ds) {
     </div>
     <div id="f_msg" class="meta"></div>`;
   renderDatasetOptions();
-  if (ds) $('f_dataset').value = ds;
+  if (ds) $('f_dataset').value = ds;       // 从左侧数据集点进来时预选它
   $('f_cancel').onclick = () => { $('modal').style.display = 'none'; restoreModal(); };
   $('f_start').onclick = startTrain;
   $('modal').style.display = 'flex';
@@ -474,9 +476,18 @@ async function startTrain() {
 function renderDatasetOptions() {
   const sel = $('f_dataset');
   if (!sel) return;
+  // 自动刷新每 4 秒会走到这里。重建 options 会把用户的选择冲回第一项，
+  // 所以先把当前值记下来，重建后再恢复（这就是「下拉框总是跳回第一个」的原因）。
+  const keep = sel.value;
   sel.innerHTML = state.datasets
     .map(d => `<option value="${d.name}"${d.has_sfm ? '' : ' disabled'}>${d.name}${d.has_sfm ? '（' + d.registered + ' 帧）' : '（未求位姿）'}</option>`)
     .join('');
+  if (keep && [...sel.options].some(o => o.value === keep && !o.disabled)) {
+    sel.value = keep;
+  } else {
+    const first = [...sel.options].find(o => !o.disabled);
+    if (first) sel.value = first.value;
+  }
 }
 
 $('newtrain').onclick = () => openTrain(null);
